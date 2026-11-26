@@ -84,7 +84,8 @@ async function receipt({kind,button,expected}) {
     record('Edge app-mode attached',await browser.version());
     await page.locator('div.watch [data-symbol=DEMO]').click();
     await page.locator('canvas[aria-label^=DEMO]').waitFor();
-    await page.locator('.data-integrity .origin-flag').getByText('SIMULATED').waitFor();
+    await page.locator('.data-integrity .origin-flag').waitFor();
+    assert.match(await page.locator('.data-integrity .origin-flag').innerText(),/SIMULATED/);
     assert.match(await page.locator('.data-integrity').innerText(),/Orders require fresh independent risk checks|Research entry veto applies/);
     await page.locator('#commandLauncher').click();
     await page.locator('#commandPalette[open]').waitFor();
