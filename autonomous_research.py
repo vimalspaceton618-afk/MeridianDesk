@@ -159,6 +159,21 @@ def investigate(symbol, snapshot, assessment, *, now=None):
     # Never permit NaN/Infinity to enter a signed or audited report.
     if not _number(facts["max_drawdown"]) or not _number(facts["drawdown"]):
         raise ValueError("Valid drawdown evidence is required.")
+    # Independently verify key risk metrics against the raw snapshot. The
+    # specialist panel cannot launder arbitrary risk values into source facts.
+    closes=[bar["close"] for bar in clean]
+    expected_drawdown=1-closes[-1]/max(closes)
+    peak=closes[0]
+    expected_max=0.
+    for closing in closes:
+        peak=max(peak,closing)
+        expected_max=max(expected_max,1-closing/peak)
+    if (not math.isclose(facts["drawdown"],expected_drawdown,rel_tol=1e-9,abs_tol=1e-9)
+            or not math.isclose(facts["max_drawdown"],expected_max,rel_tol=1e-9,abs_tol=1e-9)):
+        raise ValueError("Risk metrics do not agree with the source OHLCV snapshot.")
+    if facts["cvar99"] is not None and (not _number(facts["cvar99"]) or
+                                         not 0 <= facts["cvar99"] <= 1):
+        raise ValueError("Modeled tail-loss evidence must be a finite fraction.")
     text = json.dumps({"symbol":symbol, "bars":selected,
                        "source":snapshot["source"], "asof":asof,
                        "interval":facts["interval"], "currency":facts["currency"]},
