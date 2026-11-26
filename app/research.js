@@ -1,7 +1,7 @@
 /* Research and connections share the desktop's authenticated local API. */
 const rsStore = {engines: null, engineError: '', loading: null, registry: null, lastReport: ''};
 const rsNames = {kronos: 'Kronos', ruflo: 'Ruflo', tradingagents: 'TradingAgents',
-    swarm: 'Swarm review', research: 'Specialist review', backtest: 'Backtest', filings: 'SEC filings'};
+    swarm: 'Swarm review', autonomous: 'Autonomous local analysis', research: 'Specialist review', backtest: 'Backtest', filings: 'SEC filings'};
 
 function rsSignal(value) {
     if (['VETO', 'error', 'Unavailable'].includes(value)) return 'bad';
@@ -56,6 +56,38 @@ function rsFilings() {
         !state.market || rsIsRunning('filings') ? 'disabled' : ''));
 }
 
+function rsAutonomousPanel() {
+    const latest = [...(state.jobs || [])].reverse().find(job => job.symbol === symbol && job.task === 'autonomous');
+    const summary = '<p class="foot-note">Runs automatically after a selected global stock receives a public observation, or on demand. ' +
+        'Six local deterministic research agents plan, challenge and verify a frozen source snapshot. ' +
+        'No cloud models, broker tools, trade signals or paid inference.</p>';
+    const action = rsButton('rs-autonomous',
+        rsIsRunning('autonomous') ? 'Research in progress…' : 'Run local agents',
+        (!state.market || rsIsRunning('autonomous') ? 'disabled' : '') + ' class="primary"');
+    if (!latest) return panel('Autonomous research mission', summary +
+        '<div class="empty">No autonomous report for this instrument yet. Select a global stock or run local agents.</div>', action);
+    const report = latest.result && typeof latest.result === 'object' ? latest.result : null;
+    if (!report) return panel('Autonomous research mission', summary +
+        '<div class="panel-body">' + badge(latest.state, rsSignal(latest.state)) +
+        '<p class="tagline">' + esc(String(latest.result || 'Analyzing a frozen market snapshot.')) + '</p></div>', action);
+    const status = report.decision === 'ABSTAIN' ? 'hold' : '';
+    const explain = (report.reasons || []).map(reason => '<p>' + esc(reason) + '</p>').join('');
+    const agents = (report.agents || []).map(agent => '<div class="stat-line"><span>' +
+        esc(agent.name) + ' ' + badge(agent.signal, rsSignal(agent.signal)) + '</span>' +
+        '<span class="muted">' + esc(agent.summary) + '</span></div>').join('');
+    const evidence = '<div class="tagline">Source: ' + esc(report.source) + ' · ' +
+        esc(report.source_asof) + ' · ' + esc(report.currency) + '</div>' +
+        '<p class="foot-note">Snapshot SHA256: <code>' + esc(report.snapshot_sha256) + '</code></p>';
+    return panel('Autonomous research mission', summary + '<div class="panel-body">' +
+        '<div class="row">' + badge(report.decision, status) +
+        '<span class="muted">Evidence: ' + (report.verifier?.passed ? 'verified' : 'unverified') +
+        ' · Execution disabled</span></div>' +
+        '<div class="tagline">' + explain + '</div>' + evidence + agents +
+        '<p class="foot-note">Observed price data only. No independently verified issuer valuation or return prediction.</p>' +
+        rsButton('result', 'Open complete evidence report', 'data-id="' + esc(latest.id) + '"') +
+        '</div>', action);
+}
+
 function renderResearch() {
     const a = state.analysis || {};
     const specialists = a.agents || [];
@@ -80,6 +112,7 @@ function renderResearch() {
     return '<div class="stack">' + panel('Research instrument', snap, actions) +
         '<div class="grid-main"><div class="stack" style="align-content:start">' +
             panel('Specialist verdicts', verdicts, rsButton('rs-registry', 'Agent registry')) +
+            rsAutonomousPanel() +
             panel('Research runs', rsJobTable()) +
         '</div><div class="stack" style="align-content:start">' + panel('Risk decision', status) +
             panel('Risk and valuation', detail ? '<div class="panel-body">' + detail + '</div>' :
@@ -161,6 +194,7 @@ async function researchClick(action, element) {
     try {
         switch (action) {
         case 'rs-review': await job('research'); break;
+        case 'rs-autonomous': await job('autonomous'); break;
         case 'rs-backtest': await job('backtest'); break;
         case 'rs-swarm':
             modal('Run swarm', symbol, '<p>The local run combines specialist verdicts, a Ruflo risk review and a Kronos forecast on the selected snapshot.</p>' +
