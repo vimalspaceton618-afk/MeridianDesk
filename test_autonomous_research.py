@@ -162,6 +162,17 @@ class AutonomousJobTests(unittest.TestCase):
             # Join the worker before the temporary test directory is removed.
             self.desk.pool.shutdown(wait=True)
 
+    def test_international_watchlist_does_not_disguise_synthetic_source_as_public(self):
+        pack,_=sample(observed=False)
+        with patch.object(market,"fetch_bars",return_value=pack):
+            self.desk.state("7203.T")
+            finished=self._wait()
+            self.assertEqual(finished["result"]["decision"],"ABSTAIN")
+            selected=next(x for x in self.desk.state("7203.T")["watch"]
+                          if x["symbol"]=="7203.T")
+            self.assertEqual(selected["kind"],"SIM")
+        self.desk.pool.shutdown(wait=True)
+
     def test_manual_local_agent_run_without_external_provider(self):
         pack,_=sample()
         self.desk.accept("7203.T",pack,save=False)
