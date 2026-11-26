@@ -1,0 +1,63 @@
+name: Real Windows Edge UI GIF validation
+
+on:
+  push:
+    branches:
+      - engineering/phase-2-navigation-and-provenance
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-windows-demo-ui:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      MERIDIAN_BROKER: "off"
+      APCA_API_KEY_ID: ""
+      APCA_API_SECRET_KEY: ""
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser automation and GIF renderer
+        shell: pwsh
+        run: |
+          npm install --no-save --no-package-lock --prefix .previewdeps playwright-core@1.56.1
+          python -m pip install --disable-pip-version-check pillow==11.3.0
+
+      - name: Validate true Windows browser UI with isolated simulated account
+        shell: pwsh
+        run: |
+          if ($env:MERIDIAN_BROKER -ne 'off' -or $env:APCA_API_KEY_ID -or $env:APCA_API_SECRET_KEY) {
+            throw 'Hosted validation requires broker mode OFF and no credentials.'
+          }
+          node tests/capture-hosted-windows.cjs
+
+      - name: Assemble actual screenshot sequence into GIF
+        shell: pwsh
+        run: python tests/assemble-hosted-preview.py
+
+      - name: Publish original screenshots, animation and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeridianDesk-Hosted-Windows-UI-GIF
+          path: preview-output/
+          if-no-files-found: warn
+          retention-days: 14
