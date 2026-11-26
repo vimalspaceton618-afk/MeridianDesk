@@ -1,5 +1,6 @@
 """Meridian Desk local workstation service. The native window owns its lifetime."""
 from concurrent.futures import ThreadPoolExecutor
+import copy
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,7 @@ from filings import cached as cached_filing, refresh as refresh_filing
 from ledger import Ledger
 import market
 import universe
+from autonomous_research import investigate, report_text
 
 ROOT=Path(__file__).resolve().parent
 ASSETS={"/research.js":("research.js","text/javascript"),"/":("index.html","text/html; charset=utf-8"),"/app.css":("app.css","text/css"),"/app.js":("app.js","text/javascript"),"/meridian.ico":("meridian.ico","image/x-icon")}
@@ -58,6 +60,7 @@ class Desk:
         self.verify=verification
         self.catalog_pending=set()
         self.catalog_attempt={}
+        self.auto_checked={}
         self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix="research")
         self.workers=[]
         self.fund={s:cached_filing(s) for s in ("AAPL","MSFT")}
@@ -139,7 +142,21 @@ class Desk:
             self.catalog_attempt[s]=now
         def run():
             try:
-                self.accept(s,market.fetch_bars(s))
+                pack=market.fetch_bars(s)
+                self.accept(s,pack)
+                identity=(pack.get("asof"),pack.get("source"),pack.get("stale"))
+                with self.lock:
+                    already=self.auto_checked.get(s)==identity
+                    assessment=copy.deepcopy(self.analyses[s])
+                    if not already:
+                        self.auto_checked[s]=identity
+                # One bounded, offline review per new observed snapshot on explicit
+                # instrument selection. This does not enable paid model workers.
+                if not already:
+                    try:
+                        self.job("autonomous",s,captured=(copy.deepcopy(pack),assessment))
+                    except (RuntimeError,ValueError) as error:
+                        self.ledger.log("RESEARCH DEFERRED",s,"Autonomous review: "+str(error))
             except Exception as exc:
                 with self.lock:
                     self.errors[s]="International public market feed unavailable: "+str(exc)[:220]
@@ -211,11 +228,13 @@ class Desk:
         return result
 
     def job(self,kind,symbol,engine=None,*,captured=None):
-        if (kind not in ("research","backtest","integration","filings","swarm") or
+        if (kind not in ("research","backtest","integration","filings","swarm","autonomous") or
                 (symbol not in market.SYMBOLS and not universe.available(symbol))):
             raise ValueError("Unknown research request.")
-        if universe.available(symbol) and kind not in ("research","backtest"):
-            raise ValueError("International catalog research supports review and backtest only.")
+        if universe.available(symbol) and kind not in ("research","backtest","autonomous"):
+            raise ValueError("International catalog research supports only offline review, autonomous analysis and backtest.")
+        if kind=="autonomous" and engine not in (None,"local"):
+            raise ValueError("Autonomous research runs locally; provider routing is not authorized.")
         pack,snapshot_analysis=captured if captured is not None else self.selected(symbol)
         if kind=="integration" and engine not in ("kronos","tradingagents","ruflo"):
             raise ValueError("Unknown integration.")
@@ -238,7 +257,9 @@ class Desk:
                     del self.jobs[finished]
         def run():
             try:
-                if kind=="swarm":
+                if kind=="autonomous":
+                    result=investigate(symbol,copy.deepcopy(pack),copy.deepcopy(snapshot_analysis))
+                elif kind=="swarm":
                     from swarm import combined_review
                     result=combined_review(symbol,pack,snapshot_analysis,with_provider=(engine=="with-provider"))
                 elif kind=="integration":
@@ -262,7 +283,10 @@ class Desk:
                 success=False
             with self.lock:
                 self.jobs[key]={**row,"state":"complete" if success else "error","result":result,"finished":time.time()}
-            self.ledger.log(tag.upper(),symbol,result if isinstance(result,str) else json.dumps(result,ensure_ascii=False))
+            self.ledger.log(tag.upper(),symbol,
+                            report_text(result) if kind=="autonomous" and success
+                            else result if isinstance(result,str)
+                            else json.dumps(result,ensure_ascii=False))
         self.pool.submit(run)
         return row
 
