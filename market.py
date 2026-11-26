@@ -18,6 +18,8 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import universe
+
 SYMBOLS = {
     "BTC-USD": "Bitcoin / US Dollar",
     "ETH-USD": "Ether / US Dollar",
@@ -153,8 +155,12 @@ def _parse_yahoo(data, interval, now):
     session = next((name.capitalize() for name in ("regular", "pre", "post")
                     if (periods.get(name) or {}).get("start", now + 1) <= now
                     < (periods.get(name) or {}).get("end", 0)), "Outside reported session")
-    return _payload((_bar(*r) for r in rows), "Yahoo Finance · indicative / may be delayed",
-                    interval, session)
+    payload = _payload((_bar(*r) for r in rows), "Yahoo Finance · indicative / may be delayed",
+                       interval, session)
+    currency = result.get("meta", {}).get("currency")
+    if isinstance(currency, str) and 0 < len(currency) <= 5:
+        payload["currency"] = currency
+    return payload
 
 
 def _yahoo(symbol, host="query1", span="5d", interval="5m"):
@@ -251,7 +257,7 @@ def _with_latest(symbol, payload, *, error=None):
 
 def fetch_bars(symbol):
     """Public intraday snapshots. On outages, keep a cached source visibly stale."""
-    if symbol not in SYMBOLS:
+    if symbol not in SYMBOLS and not universe.available(symbol):
         raise ValueError("Unknown instrument")
     if symbol == "DEMO":
         return demo_bars(symbol)
@@ -266,7 +272,8 @@ def fetch_bars(symbol):
     if old and now - old[0] < (15 if symbol in _KRAKEN else 45):
         return _with_latest(symbol, old[1])
     candidates = ((lambda: _coinbase(symbol), lambda: _kraken(symbol)) if symbol in _KRAKEN
-                  else (lambda: _yahoo(symbol), lambda: _yahoo(symbol, "query2")))
+                  else (lambda: _yahoo(symbol), lambda: _yahoo(symbol, "query2"),
+                        lambda: _yahoo(symbol, "query1", "1mo", "1d")))
     try:
         data = _load_candidates(candidates)
     except FeedUnavailable as err:
@@ -284,7 +291,7 @@ def fetch_bars(symbol):
 
 def fetch_history(symbol):
     """Five-year provider OHLC (excludes dividend reinvestment) from Yahoo, or three years of explicit demo data."""
-    if symbol not in SYMBOLS:
+    if symbol not in SYMBOLS and not universe.available(symbol):
         raise ValueError("Unknown instrument")
     if symbol == "DEMO":
         return demo_bars(symbol, daily=True)
