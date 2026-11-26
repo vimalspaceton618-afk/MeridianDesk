@@ -40,7 +40,8 @@ jobs:
             test_swarm \
             test_phase1_slice \
             test_mt5_import_clean \
-            test_global_market
+            test_global_market \
+            test_autonomous_research
       - name: Verify loopback desktop API security and paper workflows
         run: |
           python3 -B -m unittest -v \
@@ -63,8 +64,8 @@ jobs:
           from pathlib import Path
           files = [
               "analytics.py", "broker.py", "desk.py", "filings.py",
-              "integrations.py", "ledger.py", "market.py",
-              "swarm.py", "universe.py", "test_phase1_slice.py", "test_mt5_import_clean.py", "test_global_market.py",
+              "integrations.py", "ledger.py", "market.py", "autonomous_research.py",
+              "swarm.py", "universe.py", "test_phase1_slice.py", "test_mt5_import_clean.py", "test_global_market.py", "test_autonomous_research.py",
           ]
           for name in files:
               compile(Path(name).read_bytes(), name, "exec")
