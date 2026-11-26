@@ -134,6 +134,43 @@ class GlobalMarketTests(unittest.TestCase):
             service.server_close()
             thread.join(timeout=3)
 
+    def test_local_global_favorites_persist_across_restart_without_network(self):
+        db=Path(self.tmp.name)/"watched.sqlite3"
+        desk=Desk(db,verification=True)
+        try:
+            first=desk.action("/api/watchlist",{"symbol":"7203.T","enabled":True})
+            self.assertEqual(first["pinned"],["7203.T"])
+            desk.action("/api/watchlist",{"symbol":"7203.T","enabled":True})
+            self.assertEqual(desk.state("DEMO")["pinned"],["7203.T"])
+            self.assertEqual(len(desk.state("DEMO")["watch"]),9)
+            self.assertIsNone(desk.state("DEMO")["watch"][-1]["price"])
+        finally:
+            desk.stop()
+        restarted=Desk(db,verification=True)
+        try:
+            self.assertEqual(restarted.state("DEMO")["pinned"],["7203.T"])
+            self.assertEqual(restarted.state("DEMO")["watch"][-1]["symbol"],"7203.T")
+            restarted.action("/api/watchlist",{"symbol":"7203.T","enabled":False})
+            self.assertEqual(restarted.state("DEMO")["pinned"],[])
+            self.assertEqual(len(restarted.state("DEMO")["watch"]),8)
+        finally:
+            restarted.stop()
+
+    def test_bounded_favorites_validate_symbol_and_input_type(self):
+        desk=self.new_desk()
+        symbols=list(universe.CATALOG)[:17]
+        for symbol in symbols[:16]:
+            desk.action("/api/watchlist",{"symbol":symbol,"enabled":True})
+        with self.assertRaisesRegex(ValueError,"limit of 16"):
+            desk.action("/api/watchlist",{"symbol":symbols[16],"enabled":True})
+        with self.assertRaisesRegex(ValueError,"approved international"):
+            desk.action("/api/watchlist",{"symbol":"FAKE.NS","enabled":True})
+        with self.assertRaisesRegex(ValueError,"Invalid watchlist"):
+            desk.action("/api/watchlist",{"symbol":symbols[0],"enabled":"yes"})
+        self.assertEqual(len(desk.state("DEMO")["pinned"]),16)
+        self.assertEqual(len(desk.state("DEMO")["watch"]),24)
+
+
 
 if __name__=="__main__":
     unittest.main()
