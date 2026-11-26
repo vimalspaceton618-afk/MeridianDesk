@@ -1,0 +1,28 @@
+# Local account data, browser profiles, caches, and logs
+.env
+.env.*
+!.env.example
+/cache/
+/data/
+/logs/
+/integrations/cache/
+/tests/*.sqlite3
+/tests/desktop-verification.json
+/tests/desktop-preview.png
+
+# Bundled runtimes and installed dependencies
+/runtime/
+/integrations/pyanalytics/
+/integrations/pydeps/
+/integrations/runtime/
+/integrations/build-tools/node_modules/
+/integrations/upstream/
+/tests/browser-tools/node_modules/
+
+# Downloaded SDK package and local launch binaries
+/native/webview2/
+/Meridian Desk.exe
+/Microsoft.Web.WebView2.Core.dll
+/Microsoft.Web.WebView2.WinForms.dll
+/WebView2Loader.dll
+/Open Meridian Desk.lnk
