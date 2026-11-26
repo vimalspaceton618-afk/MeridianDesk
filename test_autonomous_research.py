@@ -113,6 +113,7 @@ class AutonomousJobTests(unittest.TestCase):
         env.start();self.addCleanup(env.stop)
         self.desk=Desk(Path(temp.name)/"autonomous.sqlite3",verification=True)
         self.addCleanup(self.desk.stop)
+        self.addCleanup(lambda: self.desk.pool.shutdown(wait=True, cancel_futures=True))
 
     def _wait(self,symbol="7203.T",timeout=6):
         stop=time.monotonic()+timeout
