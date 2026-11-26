@@ -74,6 +74,27 @@ async function main(){
  check('Research-only international chart has explicit synthetic fixture source and JPY unit; no order button');
  await screenshot(page,'japan-quote-synthetic-validation',2200);
 
+ await page.locator('nav [data-page="research"]').click();
+ const mission=page.locator('.panel').filter({has:page.getByRole('heading',{name:'Autonomous research mission',exact:true})});
+ await mission.waitFor();
+ await mission.getByText('ABSTAIN',{exact:true}).first().waitFor({timeout:15000});
+ assert.match(await mission.innerText(),/Source: SYNTHETIC TEST FIXTURE/);
+ assert.match(await mission.innerText(),/Execution disabled/);
+ check('On-demand global stock automatically ran six local evidence agents and abstained on synthetic data');
+ await screenshot(page,'autonomous-agent-research',2200);
+ await mission.locator('button[data-act="result"]').click();
+ await page.locator('#modal[open]').waitFor();
+ const report=await page.locator('#modalBody').innerText();
+ assert.match(report,/"schema": "research-agents.v1"/);
+ assert.match(report,/"execution": "DISABLED"/);
+ assert.match(report,/"passed": true/);
+ assert.match(report,/"agents": \[/);
+ check('Structured evidence report displays SHA256 input proof and independently checked six-agent workflow');
+ await screenshot(page,'autonomous-evidence-report',1800);
+ await page.locator('#closeModal').click();
+ await page.locator('nav [data-page="market"]').click();
+ await page.locator('button[data-act="watch-toggle"]').waitFor();
+
  await page.locator('button[data-act="watch-toggle"]').click();
  await page.getByRole('button',{name:'Unpin stock'}).waitFor({timeout:12000});
  assert.ok(await page.locator('.watch button[data-symbol="7203.T"]').isVisible());
