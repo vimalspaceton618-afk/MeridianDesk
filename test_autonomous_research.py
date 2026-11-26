@@ -173,6 +173,46 @@ class AutonomousJobTests(unittest.TestCase):
             self.assertEqual(selected["kind"],"SIM")
         self.desk.pool.shutdown(wait=True)
 
+    def test_completed_job_requires_durable_audit_entry(self):
+        """A finished agent cannot be visible while its SQLite audit is pending."""
+        import threading
+        pack,_=sample()
+        self.desk.accept("7203.T",pack,save=False)
+        reached=threading.Event()
+        release=threading.Event()
+        original=self.desk.ledger.log
+
+        def slow_audit(*args,**kwargs):
+            reached.set()
+            if not release.wait(timeout=6):
+                raise TimeoutError("Test audit gate timed out")
+            return original(*args,**kwargs)
+
+        with patch.object(self.desk.ledger,"log",side_effect=slow_audit):
+            try:
+                job=self.desk.action("/api/job",{"kind":"autonomous","symbol":"7203.T"})
+                self.assertTrue(reached.wait(timeout=6),"Worker never reached audit")
+                self.assertEqual(self.desk.jobs[job["id"]]["state"],"running",
+                                 "Completed job must imply durable audit")
+            finally:
+                release.set()
+            done=self._wait()
+            self.assertEqual(done["id"],job["id"])
+            self.assertEqual(done["state"],"complete")
+            self.assertTrue(any(r["category"]=="AUTONOMOUS"
+                                for r in self.desk.ledger.recent()))
+        self.desk.pool.shutdown(wait=True)
+
+    def test_audit_error_does_not_report_successful_agent(self):
+        pack,_=sample()
+        self.desk.accept("7203.T",pack,save=False)
+        with patch.object(self.desk.ledger,"log",side_effect=OSError("disk unavailable")):
+            self.desk.action("/api/job",{"kind":"autonomous","symbol":"7203.T"})
+            done=self._wait()
+            self.assertEqual(done["state"],"error")
+            self.assertIn("audit persistence failed",done["result"])
+        self.desk.pool.shutdown(wait=True)
+
     def test_manual_local_agent_run_without_external_provider(self):
         pack,_=sample()
         self.desk.accept("7203.T",pack,save=False)
