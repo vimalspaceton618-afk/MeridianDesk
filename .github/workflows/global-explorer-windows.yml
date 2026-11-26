@@ -1,0 +1,63 @@
+name: Global Explorer Windows UI acceptance
+
+on:
+  push:
+    branches:
+      - engineering/global-market-explorer-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  global-research-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      MERIDIAN_BROKER: "off"
+      APCA_API_KEY_ID: ""
+      APCA_API_SECRET_KEY: ""
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout exact branch commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser automation and GIF tools
+        shell: pwsh
+        run: |
+          npm install --no-save --no-package-lock --prefix .previewdeps playwright-core@1.56.1
+          python -m pip install --disable-pip-version-check pillow==11.3.0
+
+      - name: Validate explorer, country search and local-only pins
+        shell: pwsh
+        run: |
+          if ($env:MERIDIAN_BROKER -ne 'off' -or $env:APCA_API_KEY_ID -or $env:APCA_API_SECRET_KEY) {
+            throw 'This UI validation may run only with broker OFF and no credentials.'
+          }
+          node tests/capture-global-windows.cjs
+
+      - name: Build GIF from authentic Edge screenshots
+        shell: pwsh
+        run: python tests/assemble-global-windows.py
+
+      - name: Upload screenshot and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Global-Explorer-Hosted-Windows-Demo
+          path: global-preview-output/
+          if-no-files-found: warn
+          retention-days: 14

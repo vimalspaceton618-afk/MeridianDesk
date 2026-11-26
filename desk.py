@@ -1,5 +1,6 @@
 """Meridian Desk local workstation service. The native window owns its lifetime."""
 from concurrent.futures import ThreadPoolExecutor
+import copy
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +21,8 @@ from broker import Broker
 from filings import cached as cached_filing, refresh as refresh_filing
 from ledger import Ledger
 import market
+import universe
+from autonomous_research import investigate, report_text
 
 ROOT=Path(__file__).resolve().parent
 ASSETS={"/research.js":("research.js","text/javascript"),"/":("index.html","text/html; charset=utf-8"),"/app.css":("app.css","text/css"),"/app.js":("app.js","text/javascript"),"/meridian.ico":("meridian.ico","image/x-icon")}
@@ -41,6 +44,7 @@ def research_trigger(previous,current):
 class Desk:
     def __init__(self, database, verification=False):
         self.ledger=Ledger(database)
+        self.pinned=self.ledger.watched()
         self.broker=Broker(self.ledger)
         self.lock=threading.RLock()
         self.order_lock=threading.RLock()
@@ -54,6 +58,9 @@ class Desk:
         self.last_gate={}
         self.last_alert={}
         self.verify=verification
+        self.catalog_pending=set()
+        self.catalog_attempt={}
+        self.auto_checked={}
         self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix="research")
         self.workers=[]
         self.fund={s:cached_filing(s) for s in ("AAPL","MSFT")}
@@ -63,6 +70,11 @@ class Desk:
             if pack and s!="DEMO":
                 pack.update(stale=True,session="Cached snapshot",age_seconds=None)
                 self.accept(s,pack,save=False)
+        for s in self.pinned:
+            cached=self.ledger.snapshot(s)
+            if cached:
+                cached.update(stale=True,session="Cached research snapshot",age_seconds=None)
+                self.accept(s,cached,save=False)
         self.accept("DEMO",market.demo_bars("DEMO"),save=False)
 
     def start(self):
@@ -117,8 +129,50 @@ class Desk:
         with self.lock:
             return {s:q["bars"][-1]["close"] for s,q in self.quotes.items()}
 
+    def request_catalog(self,s):
+        """Schedule at most two public research quote requests; never poll the full catalog."""
+        if not universe.available(s) or self.done.is_set():
+            return
+        now=time.monotonic()
+        with self.lock:
+            if (s in self.catalog_pending or len(self.catalog_pending)>=2 or
+                    now-self.catalog_attempt.get(s,-1000000)<180):
+                return
+            self.catalog_pending.add(s)
+            self.catalog_attempt[s]=now
+        def run():
+            try:
+                pack=market.fetch_bars(s)
+                self.accept(s,pack)
+                identity=(pack.get("asof"),pack.get("source"),pack.get("stale"))
+                with self.lock:
+                    already=self.auto_checked.get(s)==identity
+                    assessment=copy.deepcopy(self.analyses[s])
+                    if not already:
+                        self.auto_checked[s]=identity
+                # One bounded, offline review per new observed snapshot on explicit
+                # instrument selection. This does not enable paid model workers.
+                if not already:
+                    try:
+                        self.job("autonomous",s,captured=(copy.deepcopy(pack),assessment))
+                    except (RuntimeError,ValueError) as error:
+                        self.ledger.log("RESEARCH DEFERRED",s,"Autonomous review: "+str(error))
+            except Exception as exc:
+                with self.lock:
+                    self.errors[s]="International public market feed unavailable: "+str(exc)[:220]
+                    if s in self.quotes:
+                        self.quotes[s]["stale"]=True
+            finally:
+                with self.lock:
+                    self.catalog_pending.discard(s)
+        try:
+            self.pool.submit(run)
+        except RuntimeError:
+            with self.lock:
+                self.catalog_pending.discard(s)
+
     def selected(self,symbol):
-        if symbol not in market.SYMBOLS:
+        if symbol not in market.SYMBOLS and not universe.available(symbol):
             raise ValueError("Unknown instrument.")
         with self.lock:
             if symbol not in self.quotes:
@@ -131,8 +185,10 @@ class Desk:
             return pack,self.analyses[symbol]
 
     def state(self,s):
-        if s not in market.SYMBOLS:
+        if s not in market.SYMBOLS and not universe.available(s):
             raise ValueError("Unknown instrument.")
+        if universe.available(s):
+            self.request_catalog(s)
         with self.lock:
             watch=[]
             for k,name in market.SYMBOLS.items():
@@ -143,10 +199,22 @@ class Desk:
                     "kind":"SIM" if k=="DEMO" else "WAIT" if not q else "STALE" if q.get("stale") else
                     "LIVE" if q.get("transport","").upper() in ("WEBSOCKET","WS") else "PUBLIC",
                     "spark":[v["close"] for v in b[-18:]]})
+            for ticker in dict.fromkeys(self.pinned+([s] if universe.available(s) else [])):
+                record=universe.CATALOG[ticker]
+                q=self.quotes.get(ticker)
+                b=q["bars"] if q else []
+                watch.append({"symbol":ticker,"name":record["name"],"price":b[-1]["close"] if b else None,
+                    "change":b[-1]["close"]/b[-2]["close"]-1 if len(b)>1 else None,
+                    "kind":"WAIT" if not q else "STALE" if q.get("stale") else
+                    "SIM" if not q.get("live") else "PUBLIC",
+                    "currency":q.get("currency",record["currency"]) if q else record["currency"],
+                    "spark":[v["close"] for v in b[-18:]]})
             pack,a=self.selected(s) if s in self.quotes else (None,None)
             jobs=list(self.jobs.values())[-25:]
             err=self.errors.get(s,"")
-        return {"watch":watch,"market":pack,"analysis":a,"error":err,"symbol":s,"portfolio":self.ledger.portfolio(self.marks()),
+        return {"watch":watch,"market":pack,"analysis":a,"error":err,"symbol":s,
+            "instrument":dict(universe.CATALOG[s]) if universe.available(s) else None,
+            "pinned":list(self.pinned),"portfolio":self.ledger.portfolio(self.marks()),
             "audit":self.ledger.recent(),"broker":self.broker.status(),"broker_orders":self.broker.tickets(),
             "jobs":jobs,"filings":self.fund.get(s,{}).get("filings",[]) if self.fund.get(s) else [],"clock":time.time()}
 
@@ -161,8 +229,15 @@ class Desk:
         return result
 
     def job(self,kind,symbol,engine=None,*,captured=None):
-        if kind not in ("research","backtest","integration","filings","swarm") or symbol not in market.SYMBOLS:
+        if (kind not in ("research","backtest","integration","filings","swarm","autonomous") or
+                (symbol not in market.SYMBOLS and not universe.available(symbol))):
             raise ValueError("Unknown research request.")
+        if universe.available(symbol) and kind not in ("research","backtest","autonomous","swarm"):
+            raise ValueError("International catalog research supports only review, local swarm, autonomous analysis and backtest.")
+        if universe.available(symbol) and kind=="swarm" and engine is not None:
+            raise ValueError("Global equities permit local-only Ruflo/Kronos swarm; external provider modes are disabled.")
+        if kind=="autonomous" and engine not in (None,"local"):
+            raise ValueError("Autonomous research runs locally; provider routing is not authorized.")
         pack,snapshot_analysis=captured if captured is not None else self.selected(symbol)
         if kind=="integration" and engine not in ("kronos","tradingagents","ruflo"):
             raise ValueError("Unknown integration.")
@@ -185,7 +260,9 @@ class Desk:
                     del self.jobs[finished]
         def run():
             try:
-                if kind=="swarm":
+                if kind=="autonomous":
+                    result=investigate(symbol,copy.deepcopy(pack),copy.deepcopy(snapshot_analysis))
+                elif kind=="swarm":
                     from swarm import combined_review
                     result=combined_review(symbol,pack,snapshot_analysis,with_provider=(engine=="with-provider"))
                 elif kind=="integration":
@@ -209,11 +286,21 @@ class Desk:
                 success=False
             with self.lock:
                 self.jobs[key]={**row,"state":"complete" if success else "error","result":result,"finished":time.time()}
-            self.ledger.log(tag.upper(),symbol,result if isinstance(result,str) else json.dumps(result,ensure_ascii=False))
+            self.ledger.log(tag.upper(),symbol,
+                            report_text(result) if kind=="autonomous" and success
+                            else result if isinstance(result,str)
+                            else json.dumps(result,ensure_ascii=False))
         self.pool.submit(run)
         return row
 
     def action(self,path,body):
+        if path=="/api/watchlist":
+            symbol=body.get("symbol")
+            if not universe.available(symbol):
+                raise ValueError("Only approved international research symbols can be pinned.")
+            with self.lock:
+                self.pinned=self.ledger.watch(symbol,body.get("enabled"))
+                return {"pinned":list(self.pinned)}
         if path=="/api/job":
             return self.job(body["kind"],body["symbol"],body.get("engine"))
         if path=="/api/halt":
@@ -222,6 +309,8 @@ class Desk:
             return {"ok":True}
         if path in ("/api/paper","/api/broker/order"):
             s=body["symbol"]
+            if universe.available(s):
+                raise ValueError("International catalog equities are research-only; trading requires separate currency, venue and broker authorization.")
             with self.order_lock:
                 pack,a=self.selected(s)
                 if path=="/api/broker/order":
@@ -295,6 +384,8 @@ def serve(desk,secret):
                     result=desk.engines()
                 elif parts.path=="/api/registry":
                     result=registry()
+                elif parts.path=="/api/catalog":
+                    result=universe.entries()
                 else:
                     return self.reply(404,{"error":"Unknown route."})
                 self.reply(200,result)

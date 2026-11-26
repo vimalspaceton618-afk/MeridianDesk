@@ -39,7 +39,9 @@ jobs:
             test_orders \
             test_swarm \
             test_phase1_slice \
-            test_mt5_import_clean
+            test_mt5_import_clean \
+            test_global_market \
+            test_autonomous_research
       - name: Verify loopback desktop API security and paper workflows
         run: |
           python3 -B -m unittest -v \
@@ -50,14 +52,20 @@ jobs:
             test_desk.DesktopServiceTests.test_mt5_report_import \
             test_desk.DesktopServiceTests.test_duplicate_job_and_reported_worker_error \
             test_desk.DesktopServiceTests.test_fresh_price_dislocation_queues_local_swarm_once
+      - name: Verify global explorer JavaScript and browser-safe rendering
+        run: |
+          node --check app/app.js
+          node --check app/research.js
+          node --check test_global_ui.cjs
+          node test_global_ui.cjs
       - name: Check source compilation (without executing Windows launcher)
         run: |
           python3 - <<'PY'
           from pathlib import Path
           files = [
               "analytics.py", "broker.py", "desk.py", "filings.py",
-              "integrations.py", "ledger.py", "market.py",
-              "swarm.py", "test_phase1_slice.py", "test_mt5_import_clean.py",
+              "integrations.py", "ledger.py", "market.py", "autonomous_research.py",
+              "swarm.py", "universe.py", "test_phase1_slice.py", "test_mt5_import_clean.py", "test_global_market.py", "test_autonomous_research.py",
           ]
           for name in files:
               compile(Path(name).read_bytes(), name, "exec")

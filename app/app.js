@@ -14,6 +14,7 @@ const sections={
  connections:['Connections','DATA & MODELS','Inspect research engines, filing sources and MetaTrader reports.']
 };
 const glyphs={market:'M3 17l5-6 4 3 8-10 M3 4v16h18',research:'M5 8l7-5 7 5v8l-7 5-7-5z M5 8l7 5 7-5 M12 13v8',portfolio:'M3 8h18v12H3z M8 8V5h8v3 M3 13h18',audit:'M6 3h12v18H6z M9 8h6 M9 12h6 M9 16h4',connections:'M5 4v5m5-5v5M3 9h9v2a4.5 4.5 0 01-4.5 4.5V19h6a4 4 0 004-4v-2'};
+let globalCatalog=null;
 const watchMeta={'BTC-USD':['BTC','₿','btc'],'ETH-USD':['ETH','Ξ','eth'],'SPY':['SPY','S','spy'],'AAPL':['AAPL','A',''],'MSFT':['MSFT','M',''],'EURUSD=X':['EUR/USD','€',''],'GC=F':['Gold','Au','gc'],'DEMO':['DEMO','D','']};
 function svg(k){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${glyphs[k]}"/></svg>`}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -24,6 +25,38 @@ function pc(x,signed=false){return Number.isFinite(x)?(signed&&x>0?'+':'')+(x*10
 function tone(x){return x>0?'positive':x<0?'negative':'flat'}
 function clock(t){return new Date(t*1000).toISOString().slice(11,19)+' UTC'}
 function stamp(t){return new Date(t*1000).toISOString().replace('T',' ').slice(0,19)+' UTC'}
+function instrumentMeta(s){return watchMeta[s]||[s,s.slice(0,2),'']}
+async function openGlobalExplorer(){
+ if(!globalCatalog)globalCatalog=await api('/api/catalog');
+ const regions=[...new Set(globalCatalog.map(record=>record.country))].sort((a,b)=>a.localeCompare(b));
+ modal('Global stock explorer','RESEARCH-ONLY · INDICATIVE FEEDS',
+   '<div class="global-help">Explore international equity listings. Prices load only when you select an instrument. Public observations may be delayed, unavailable, or in local currency. No live trading is enabled for these listings.</div>'+
+   '<div class="global-controls"><input id="globalSearch" type="search" autocomplete="off" placeholder="Search issuer, ticker or exchange" aria-label="Search global companies">'+
+   '<select id="globalRegion" aria-label="Filter stock market"><option value="">All countries</option>'+
+   regions.map(country=>'<option value="'+esc(country)+'">'+esc(country)+'</option>').join('')+'</select></div>'+
+   '<p class="global-summary" id="globalSummary" role="status"></p><div class="global-results" id="globalResults"></div>');
+ $('globalSearch').oninput=renderGlobalExplorer;
+ $('globalRegion').onchange=renderGlobalExplorer;
+ renderGlobalExplorer();
+ $('globalSearch').focus();
+}
+function renderGlobalExplorer(){
+ if(!$('globalResults')||!globalCatalog)return;
+ const query=$('globalSearch').value.trim().toLowerCase();
+ const country=$('globalRegion').value;
+ const matches=globalCatalog.filter(record=>(!country||record.country===country)&&
+   [record.symbol,record.name,record.country,record.exchange].join(' ').toLowerCase().includes(query));
+ matches.sort((a,b)=>Number((state?.pinned||[]).includes(b.symbol))-Number((state?.pinned||[]).includes(a.symbol)));
+ $('globalSummary').textContent=matches.length+' listings match · '+globalCatalog.length+' curated worldwide · browse or search';
+ $('globalResults').innerHTML=matches.slice(0,55).map(record=>
+  '<button type="button" data-global-symbol="'+esc(record.symbol)+'" class="global-result">'+
+  '<span class="global-symbol">'+esc(record.symbol)+'</span>'+
+  '<span class="global-title"><strong>'+esc(record.name)+'</strong><small>'+
+  esc(record.country)+' · '+esc(record.exchange)+'</small></span>'+
+  '<span class="global-currency">'+((state?.pinned||[]).includes(record.symbol)?'PINNED · ':'')+esc(record.currency)+'</span></button>').join('')||
+  '<div class="empty">No matching listing in the curated directory.</div>';
+ if(matches.length>55)$('globalSummary').textContent+=' · showing first 55; use search to narrow';
+}
 function instrumentSelect(){return `<select class="instrument-select" aria-label="Selected instrument">${state.watch.map(w=>`<option value="${esc(w.symbol)}" ${symbol===w.symbol?'selected':''}>${esc(w.symbol)} · ${esc(w.name)}</option>`).join('')}</select>`}
 function modal(title,label,html){$('modalTitle').textContent=title;$('modalLabel').textContent=label;$('modalBody').innerHTML=html;if(!$('modal').open)$('modal').showModal()}
 function toast(text){clearTimeout(toastTimer);$('toast').textContent=text;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,6500)}
@@ -40,11 +73,34 @@ async function refresh(){
  finally{inFlight=false;if(s!==symbol)void refresh()}
 }
 function navigate(id){if(sections[id]){page=id;render();window.scrollTo(0,0)}}
-function selectInstrument(s){if(!watchMeta[s])return;symbol=s;if(state?.symbol!==s){state={...state,symbol:s,market:null,analysis:null,error:''};render()}refresh()}
+function selectInstrument(s){
+ const selected=globalCatalog?.find(record=>record.symbol===s);
+ const fromWatch=state?.watch.find(record=>record.symbol===s);
+ if(!watchMeta[s]&&!selected&&!fromWatch)return;
+ const global=selected||(!watchMeta[s]&&fromWatch?
+  {symbol:s,name:fromWatch.name,country:'International',exchange:'View listing details',currency:fromWatch.currency}:null);
+ symbol=s;
+ if(state?.symbol!==s){
+  const watch=state?.watch||[];
+  const extra=global&&!watch.some(item=>item.symbol===s)?
+   [{symbol:s,name:global.name,price:null,change:null,kind:'WAIT',currency:global.currency,spark:[]}]:[];
+  state={...state,symbol:s,market:null,analysis:null,
+   error:global?'Requesting public observation on demand…':'',
+   instrument:global,watch:watch.concat(extra)};
+  render();
+ }
+ refresh();
+}
 function render(){
  $('navigation').innerHTML=Object.keys(sections).map(k=>`<button data-page="${k}" title="${sections[k][0]}" class="${k===page?'active':''}">${svg(k)}<span>${sections[k][0]}</span></button>`).join('');
  const [title,kicker,subtitle]=sections[page];$('title').textContent=title;$('crumb').textContent=title;$('kicker').textContent=kicker;$('subtitle').textContent=subtitle;
- $('pageActions').innerHTML=page==='market'?'<button data-act="ticket" class="primary">New paper order</button>':page==='portfolio'?`<button class="danger" data-act="halt">${state?.portfolio.halted?'Resume trading':'Halt new orders'}</button><button data-act="ticket">New paper order</button>`:'';
+ $('pageActions').innerHTML=page==='market'?
+  '<button data-act="catalog">Explore global stocks</button>'+
+  (state?.instrument?
+   '<button data-act="watch-toggle">'+((state?.pinned||[]).includes(symbol)?'Unpin stock':'Pin to watchlist')+'</button>':
+   '<button data-act="ticket" class="primary">New paper order</button>'):
+  page==='portfolio'?'<button class="danger" data-act="halt">'+(state?.portfolio.halted?'Resume trading':'Halt new orders')+'</button>'+
+  (state?.instrument?'':'<button data-act="ticket">New paper order</button>'):'';
  if(!state)return;
  $('health').innerHTML='<i class="dot"></i> Desk online';$('footerInfo').textContent=(state.portfolio.halted?'New orders halted':'Paper account enabled')+'  ·  Data stored on E:';
  $('content').innerHTML=page==='market'?renderMarket():page==='research'?renderResearch():page==='connections'?renderConnections():page==='portfolio'?renderPortfolio():renderAudit();
@@ -52,12 +108,14 @@ function render(){
  if(state.market&&state.analysis)document.body.dataset.ready='yes';
 }
 function renderMarket(){
- const m=state.market,a=state.analysis,r=a?.risk||{},w=state.watch.find(x=>x.symbol===symbol);
+ const m=state.market,a=state.analysis,r=a?.risk||{},
+ w=state.watch.find(x=>x.symbol===symbol)||state.instrument||{symbol,name:symbol};
+ const isGlobal=!!state.instrument,unit=m?.currency||state.instrument?.currency;
  const tiles=state.watch.filter(w=>['BTC-USD','ETH-USD','SPY','GC=F'].includes(w.symbol)).map(w=>`<button class="quote ${w.symbol===symbol?'sel':''}" data-symbol="${esc(w.symbol)}"><div><strong>${esc(watchMeta[w.symbol][0])}</strong><span class="sub">${esc(w.kind)}</span></div><div class="big">${price(w.price)}</div><span class="mono ${tone(w.change)}">${pc(w.change,true)}</span> <small>last bar</small></button>`).join('');
- const list=state.watch.map(w=>{const [name,mark,cls]=watchMeta[w.symbol];return `<button data-symbol="${esc(w.symbol)}" class="${w.symbol===symbol?'selected':''}"><span class="row-start"><span class="asset ${cls}">${esc(mark)}</span><span><strong>${esc(name)}</strong><small>${esc(w.name)}</small></span></span><span class="price">${price(w.price)}<small>${esc(w.kind)}</small></span></button>`}).join('');
- const chart=m?`<div class="chart-top"><div><div class="chart-title">${esc(w.name)}</div><div class="big">${price(w.price)}</div><div class="chart-sub"><span class="${tone(w.change)}">${pc(w.change,true)}</span> · previous ${esc(m.interval)} bar</div></div><div class="chart-tool"><div class="tabs">${[30,90,240].map(n=>`<button class="${n===windowBars?'on':''}" title="Show ${n} bars" data-act="range" data-val="${n}">${n}</button>`).join('')}</div><div class="tabs"><button data-act="style">${chartStyle}</button></div></div></div><div class="canvas-wrap"><canvas id="chart" aria-label="${esc(symbol)} price and volume history"></canvas></div><div class="chart-foot"><span>${esc(m.source)}</span><span>${esc(m.interval)} · ${clock(m.asof)}</span></div>`:`<div class="empty tall">Waiting for ${esc(symbol)} market data. ${esc(state.error)}<p class="section-gap">Select DEMO for offline research.</p></div>`;
+ const list=state.watch.map(w=>{const [name,mark,cls]=instrumentMeta(w.symbol);return `<button data-symbol="${esc(w.symbol)}" class="${w.symbol===symbol?'selected':''}"><span class="row-start"><span class="asset ${cls}">${esc(mark)}</span><span><strong>${esc(name)}</strong><small>${esc(w.name)}</small></span></span><span class="price">${price(w.price)}<small>${esc(w.kind)}</small></span></button>`}).join('');
+ const chart=m?`<div class="chart-top"><div><div class="chart-title">${esc(w.name)}</div><div class="big">${price(w.price)}${unit?'<small class="price-unit"> '+esc(unit)+'</small>':''}</div><div class="chart-sub"><span class="${tone(w.change)}">${pc(w.change,true)}</span> · previous ${esc(m.interval)} bar</div></div><div class="chart-tool"><div class="tabs">${[30,90,240].map(n=>`<button class="${n===windowBars?'on':''}" title="Show ${n} bars" data-act="range" data-val="${n}">${n}</button>`).join('')}</div><div class="tabs"><button data-act="style">${chartStyle}</button></div></div></div><div class="canvas-wrap"><canvas id="chart" aria-label="${esc(symbol)} price and volume history"></canvas></div><div class="chart-foot"><span>${esc(m.source)}</span><span>${esc(m.interval)} · ${clock(m.asof)}</span></div>`:`<div class="empty tall">Waiting for ${esc(symbol)} market data. ${esc(state.error)}<p class="section-gap">Select DEMO for offline research.</p></div>`;
  const metrics=[['One-bar CVaR 99%',pc(r.cvar99)],['Peak drawdown',pc(r.max_drawdown)],['Volatility / bar',pc(r.bar_volatility)]].map(([k,v])=>`<div><label>${k}</label><b>${v}</b></div>`).join('');
- return `<div class="quotes">${tiles}</div><div class="grid-main"><section class="panel"><div class="panel-head"><h2>Price action</h2>${badge(m?(m.live?(m.stale?'Stale observation':m.transport||'Public feed'):'Simulated'):'Awaiting feed',m?.stale?'hold':m?.live?'good':'')}</div>${chart}</section><section class="panel"><div class="panel-head"><h2>Watchlist</h2><span class="sub">${state.watch.length} instruments</span></div><div class="watch">${list}</div></section></div><div class="grid-main lower">${panel('Risk assessment',`<div class="metric-grid">${metrics}</div><p class="note ${a?.veto?'amber':''}">${esc(!a?'Waiting for a usable price history.':m?.stale?'Market data are stale. New orders are on hold.':a.reasons.slice(0,2).join(' ')||'No entry veto recorded for this snapshot.')}</p>`,badge(a?(a.veto||m?.stale?'Entry on hold':'Research gate clear'):'Awaiting data',a?.veto||m?.stale?'hold':a?'good':''))}${panel('Research swarm',`<div class="row"><h3>${a?a.agents.length:0} specialist checks</h3>${badge('8 pods')}</div><p class="tagline">${esc(a?.verdict||'Awaiting analysis')}</p><button data-page="research" class="text-btn section-gap">Inspect findings →</button>`)}</div>`
+ return `${isGlobal?'<div class="global-disclosure">'+esc(w.name)+' · '+esc(state.instrument.country)+' / '+esc(state.instrument.exchange)+' · '+esc(state.instrument.currency)+' · Research only. Public indicative or delayed data; no trading authorization.</div>':''}<div class="quotes">${tiles}</div><div class="grid-main"><section class="panel"><div class="panel-head"><h2>Price action</h2>${badge(m?(m.live?(m.stale?'Stale observation':m.transport||'Public feed'):'Simulated'):'Awaiting feed',m?.stale?'hold':m?.live?'good':'')}</div>${chart}</section><section class="panel"><div class="panel-head"><h2>Watchlist</h2><span class="sub">${state.watch.length} instruments</span></div><div class="watch">${list}</div></section></div><div class="grid-main lower">${panel('Risk assessment',`<div class="metric-grid">${metrics}</div><p class="note ${a?.veto?'amber':''}">${esc(!a?'Waiting for a usable price history.':m?.stale?'Market data are stale. New orders are on hold.':a.reasons.slice(0,2).join(' ')||'No entry veto recorded for this snapshot.')}</p>`,badge(a?(a.veto||m?.stale?'Entry on hold':'Research gate clear'):'Awaiting data',a?.veto||m?.stale?'hold':a?'good':''))}${panel('Research swarm',`<div class="row"><h3>${a?a.agents.length:0} specialist checks</h3>${badge('8 pods')}</div><p class="tagline">${esc(a?.verdict||'Awaiting analysis')}</p><button data-page="research" class="text-btn section-gap">Inspect findings →</button>`)}</div>`
 }
 function drawChart(){
  const c=$('chart');if(!c||!state.market)return;
@@ -94,8 +152,9 @@ function renderAudit(){
  return `<section class="panel"><div class="panel-head"><h2>Desk activity</h2><span class="sub">Latest ${state.audit.length} events</span></div>${state.audit.length?state.audit.map(r=>`<div class="audit-item"><span class="mono muted">${esc(stamp(r.ts))}</span><span>${esc(r.category)}</span><b>${esc(r.symbol)}</b><span><span class="audit-preview">${esc(r.detail)}</span><button class="text-btn" data-act="record" data-id="${r.id}">View record</button></span></div>`).join(''):'<div class="empty">Research runs, trades and risk decisions will appear here.</div>'}</section>`
 }
 async function job(kind,engine){const j=await api('/api/job',{kind,engine,symbol});toast(`${j.task} queued for ${symbol}.`);await refresh();return j}
-function showResult(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;const out=typeof j.result==='object'?Object.entries(j.result).map(([k,v])=>`${k}   ${v}`).join('\n'):j.result;modal(`${j.task} · ${j.symbol}`,j.state.toUpperCase(),`<pre class="result">${esc(out||'Research is in progress.')}</pre>`)}
+function showResult(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;const out=j.result&&typeof j.result==='object'?JSON.stringify(j.result,null,2):j.result;modal(`${j.task} · ${j.symbol}`,j.state.toUpperCase(),`<pre class="result">${esc(out||'Research is in progress.')}</pre>`)}
 function ticket(remote){
+ if(state?.instrument){toast('Global catalog instruments are research-only; broker and paper orders remain disabled.');return}
  const m=state?.market;if(!m){toast('Select an instrument with market observations.');return}
  const s=symbol,p=m.bars.at(-1).close,mode=remote?state.broker.mode.toUpperCase():'LOCAL PAPER',digits=p<2?5:2,ref=crypto.randomUUID();
  modal(remote?'Broker limit order':'Paper limit order',mode,`<form id="ticket"><p><strong>${esc(s)}</strong> · ${esc(m.source)}<br>Latest observation ${price(p)} · ${clock(m.asof)}</p><div class="form-pair"><div class="field"><label for="side">Side</label><select id="side"><option value="buy">Buy</option><option value="sell">Sell</option></select></div><div class="field"><label for="qty">Quantity</label><input id="qty" type="number" min="0.00000001" step="any" required value="${p>10000?.01:1}"></div></div><div class="field"><label for="limit">Limit price (USD)</label><input id="limit" type="number" step="any" min="0.00000001" required value="${(p*1.001).toFixed(digits)}"></div>${remote?`<div class="field"><label for="confirmation" id="confirmLabel">Type ${mode} BUY ${esc(s)} to submit</label><input id="confirmation" autocomplete="off" required></div>`:'<p class="foot-note">Immediate-or-cancel paper fill. Modeled slippage is 2 bp and fees are 1 bp, with a $0.01 minimum.</p>'}<div class="dialog-error" id="ticketError" role="alert"></div><button type="submit" class="${mode==='LIVE'?'danger':'primary'}">${remote?'Submit '+mode.toLowerCase()+' broker order':'Submit paper order'}</button></form>`);
@@ -110,8 +169,17 @@ document.addEventListener('click',async e=>{
  try{
   if(el.dataset.page){navigate(el.dataset.page);return}
   if(el.dataset.symbol){selectInstrument(el.dataset.symbol);return}
+  if(el.dataset.globalSymbol){$('modal').close();selectInstrument(el.dataset.globalSymbol);return}
   const act=el.dataset.act;
-  if(act==='range'){windowBars=Number(el.dataset.val);render()}
+  if(act==='catalog')await openGlobalExplorer();
+  else if(act==='watch-toggle'){
+   if(!state?.instrument)throw Error('Select an international catalog listing first.');
+   const enable=!(state.pinned||[]).includes(symbol);
+   await api('/api/watchlist',{symbol,enabled:enable});
+   toast(enable?'Stock pinned locally. Quotes load when selected.':'Stock removed from saved watchlist.');
+   await refresh();
+  }
+  else if(act==='range'){windowBars=Number(el.dataset.val);render()}
   else if(act==='style'){chartStyle=chartStyle==='Candles'?'Line':'Candles';render()}
   else if(act==='ticket'||act==='broker-ticket')ticket(act==='broker-ticket');
   else if(act==='result')showResult(el.dataset.id);

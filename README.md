@@ -25,6 +25,16 @@ This repository contains the application source, tests, documentation, and selec
 
 The watchlist distinguishes **LIVE** ticker observations, **PUBLIC** indicative bars, **SIM** data, **STALE** cached observations, and **WAIT** while awaiting a provider. Check the source, time and session shown with the instrument. A public bar is suitable for research. Local paper fills on a real-market symbol require a two-sided quote aged two seconds or less and a spread within 1%. A chart can continue displaying data while its execution checks block orders. DEMO remains available during an outage.
 
+## Worldwide equity discovery (research-only preview)
+
+**Explore global stocks** on Market overview to open a searchable directory of 150+ international equities covering 25+ countries across major exchanges in North America, Europe, Asia-Pacific, Latin America, Africa and the Middle East. Indian stock exchanges are excluded. Search companies/tickers or filter a country; selecting a listing requests public chart bars **on demand**, rather than loading hundreds of symbols in the startup watcher. Press **Pin to watchlist** to save up to 16 international instruments locally; they return after restart and are only refreshed upon selection.
+
+Catalog securities are **research-only** and blocked by both local-paper and Alpaca order routes. Original instruments retain their existing authorization and risk policy. Public Yahoo Finance data may be delayed, incomplete or unavailable, and cannot be described as guaranteed live/licensed market data. Prices can be JPY, GBp, EUR, CAD or other local currencies—not implicitly USD. Data is not replaced with simulated quotes during outages; persisted international snapshots reopen as stale.
+
+The country/ticker directory is a curated starting selection, **not a comprehensive exchange security master**. Public feed use, redistributive licensing and institutional market access still require separate contracts and verification. Technical detail and tests: [Global Market Explorer](docs/GLOBAL_MARKET_EXPLORER.md).
+
+**Autonomous research agents:** selecting a global stock automatically queues a source-limited, offline six-specialist mission with independent evidence checks, risk challenge, abstention on missing/uncertain data, and a report in Research swarm. Run local Ruflo/Kronos research explicitly if installed; no automatic hosted-model calls or trading. The 300-card registry is a set of research profiles, not 300 independently reasoning LLM agents. See [Autonomous research contract](docs/AUTONOMOUS_AGENTS.md) for exactly what runs and what remains unbuilt.
+
 ## Risk, valuation and backtests
 
 - The risk panel uses observed closing-price drawdowns, per-bar realized volatility, a variance-targeted GARCH(1,1) scenario and 10,000 seeded one-bar shocks for modeled 99% expected shortfall. The scenario assumes normal shocks. Outputs describe the selected bar interval. Quarter-Kelly uses observed gains and losses when the series has enough variation; the displayed estimate is capped at 15%.
