@@ -86,6 +86,17 @@ class AgentEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"verification"):
                 agents.investigate("7203.T",pack,analysis)
 
+    def test_rejects_forged_risk_metrics_even_when_timestamp_matches(self):
+        pack,assessment=sample()
+        corrupt=copy.deepcopy(assessment)
+        corrupt["risk"]["drawdown"]=.99
+        with self.assertRaisesRegex(ValueError,"Risk metrics do not agree"):
+            agents.investigate("7203.T",pack,corrupt)
+        corrupt=copy.deepcopy(assessment)
+        corrupt["risk"]["cvar99"]=float("nan")
+        with self.assertRaisesRegex(ValueError,"finite fraction"):
+            agents.investigate("7203.T",pack,corrupt)
+
     def test_bounded_snapshot_rejects_unbounded_payload(self):
         pack,analysis=sample()
         pack["bars"]*=200
@@ -127,6 +138,26 @@ class AutonomousJobTests(unittest.TestCase):
             provider.assert_called_once_with("7203.T")
         self.assertTrue(any(a["category"]=="AUTONOMOUS" for a in self.desk.ledger.recent()))
         self.assertEqual(self.desk.state("DEMO")["portfolio"]["orders"],[])
+
+    def test_foreign_stock_local_swarm_only_and_explicitly_requested(self):
+        pack,_=sample()
+        self.desk.accept("7203.T",pack,save=False)
+        with self.assertRaisesRegex(ValueError,"local-only"):
+            self.desk.action("/api/job",{"kind":"swarm","symbol":"7203.T",
+                                            "engine":"with-provider"})
+        with patch("swarm.combined_review",return_value="Mock local model result; no broker access") as worker:
+            job=self.desk.action("/api/job",{"kind":"swarm","symbol":"7203.T"})
+            self.assertEqual(job["task"],"swarm")
+            limit=time.monotonic()+4
+            while time.monotonic()<limit:
+                done=self.desk.jobs[job["id"]]
+                if done["state"]!="running":
+                    break
+                time.sleep(.02)
+            self.assertEqual(done["state"],"complete",done["result"])
+            self.assertIn("Mock local",done["result"])
+            worker.assert_called_once()
+            self.assertFalse(worker.call_args.kwargs["with_provider"])
 
     def test_manual_local_agent_run_without_external_provider(self):
         pack,_=sample()
