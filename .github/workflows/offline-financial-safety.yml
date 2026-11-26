@@ -38,7 +38,8 @@ jobs:
             test_market \
             test_orders \
             test_swarm \
-            test_phase1_slice
+            test_phase1_slice \
+            test_mt5_import_clean
       - name: Check source compilation (without executing Windows launcher)
         run: |
           python3 - <<'PY'
@@ -46,7 +47,7 @@ jobs:
           files = [
               "analytics.py", "broker.py", "desk.py", "filings.py",
               "integrations.py", "ledger.py", "market.py",
-              "swarm.py", "test_phase1_slice.py",
+              "swarm.py", "test_phase1_slice.py", "test_mt5_import_clean.py",
           ]
           for name in files:
               compile(Path(name).read_bytes(), name, "exec")
