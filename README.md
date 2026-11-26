@@ -33,6 +33,8 @@ Catalog securities are **research-only** and blocked by both local-paper and Alp
 
 The country/ticker directory is a curated starting selection, **not a comprehensive exchange security master**. Public feed use, redistributive licensing and institutional market access still require separate contracts and verification. Technical detail and tests: [Global Market Explorer](docs/GLOBAL_MARKET_EXPLORER.md).
 
+**Autonomous research agents:** selecting a global stock automatically queues a source-limited, offline six-specialist mission with independent evidence checks, risk challenge, abstention on missing/uncertain data, and a report in Research swarm. Run local Ruflo/Kronos research explicitly if installed; no automatic hosted-model calls or trading. The 300-card registry is a set of research profiles, not 300 independently reasoning LLM agents. See [Autonomous research contract](docs/AUTONOMOUS_AGENTS.md) for exactly what runs and what remains unbuilt.
+
 ## Risk, valuation and backtests
 
 - The risk panel uses observed closing-price drawdowns, per-bar realized volatility, a variance-targeted GARCH(1,1) scenario and 10,000 seeded one-bar shocks for modeled 99% expected shortfall. The scenario assumes normal shocks. Outputs describe the selected bar interval. Quarter-Kelly uses observed gains and losses when the series has enough variation; the displayed estimate is capped at 15%.
