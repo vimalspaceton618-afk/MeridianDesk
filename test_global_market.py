@@ -28,6 +28,9 @@ class GlobalMarketTests(unittest.TestCase):
     def new_desk(self):
         desk = Desk(Path(self.tmp.name) / "research.sqlite3", verification=True)
         self.addCleanup(desk.stop)
+        # Windows may keep temporary SQLite files locked while a background
+        # research task is still finishing; join it before temp cleanup.
+        self.addCleanup(lambda: desk.pool.shutdown(wait=True, cancel_futures=True))
         return desk
 
     def test_coverage_does_not_expand_eight_background_watchers(self):
@@ -84,11 +87,12 @@ class GlobalMarketTests(unittest.TestCase):
             self.assertEqual(len(first["watch"]),9)
             self.assertEqual(first["instrument"]["currency"],"JPY")
             self.assertTrue(all(x["symbol"] in market.SYMBOLS for x in first["watch"][:8]))
-            for _ in range(70):
+            deadline=time.monotonic()+6
+            while time.monotonic()<deadline:
                 state=desk.state("7203.T")
                 if state["market"] is not None:
                     break
-                time.sleep(.01)
+                time.sleep(.025)
             self.assertIsNotNone(state["market"])
             self.assertEqual(state["market"]["currency"],"JPY")
             self.assertEqual(state["watch"][-1]["kind"],"PUBLIC")
