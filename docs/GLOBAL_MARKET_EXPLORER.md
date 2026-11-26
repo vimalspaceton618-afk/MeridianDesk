@@ -12,7 +12,7 @@ The original `market.SYMBOLS` list contains eight watched instruments and refres
 - `GET /api/catalog`: authenticated localhost endpoint that returns catalog records without contacting a market provider.
 - `market.fetch_bars` and `market.fetch_history`: permit the approved catalog tickers. Use the existing Yahoo chart public/indicative feed with source and timestamps; attempt daily bars when minute bars are unavailable. No synthetic fallback for real securities. Currency is extracted from provider metadata if supplied.
 - `Desk.request_catalog`: limit on-demand quote fetches to two concurrent catalog tasks; keep a three-minute per-symbol request cooldown. Do not poll every catalog item. Unknown symbols remain invalid.
-- UI: **Explore global stocks** (search issuer/ticker/country/exchange, filter by country) and select a symbol. Display researched exchange/currency, and explicitly label **research-only**, source and delayed/stale nature. The original watchlist remains eight entries until the selected foreign listing is appended temporarily.
+- UI: **Explore global stocks** (search issuer/ticker/country/exchange, filter by country) and select a symbol. Display researched exchange/currency, and explicitly label **research-only**, source and delayed/stale nature. Users can pin/unpin up to 16 international listings; these favorites persist in the local SQLite account and reappear after restart alongside the original eight symbols. Favorite quotes refresh on explicit selection (with cooldown), not through unlimited background polling.
 - **Safety:** catalog instruments cannot submit to either local paper trading or Alpaca, even if future provider updates add bid/ask fields. They may run local deterministic research and backtesting only. No new integration-agent, filing-refresh, or broker execution authority is granted.
 
 ## Data semantics and costs
@@ -23,6 +23,10 @@ For UK equities, some feeds quote in **GBp** (pence), not GBP pounds. Country me
 
 Some exchanges have different holidays, auctions, settlement, symbol changes and country-specific restrictions. They have **not** been independently verified in this milestone. Provider mapping is not proof that live prices exist or that use/redistribution is licensed.
 
+## Local favorites and recovery
+
+The ledger creates a separate watchlist table using a non-destructive `CREATE TABLE IF NOT EXISTS` migration. Pin/unpin writes are transactional and limited to 16 international symbols. On startup, persisted snapshots of favorite instruments can be displayed only as **STALE** until refreshed; no background fetch of all saved symbols takes place. Account balances, paper order tables, broker routing and risk calculations are unchanged.
+
 ## Acceptance criteria
 
 1. Authenticate catalog API; reject unauthenticated requests.
@@ -31,7 +35,7 @@ Some exchanges have different holidays, auctions, settlement, symbol changes and
 4. Limit concurrent catalog refreshes and apply per-symbol cooldown; surface source outages safely.
 5. Preserve quote currency (e.g., JPY, GBp, CAD, BRL) and source/interval metadata.
 6. Forbid international catalog symbols on both local paper-order and remote broker-order routes; preserve existing protections for the eight original instruments.
-7. Search/filter UI works with existing modal, keyboard focus, no extra dependencies, no replacement of Windows launcher or application data.
+7. Search/filter UI works with existing modal, keyboard focus, no extra dependencies, no replacement of Windows launcher. Favorites must survive restart, cap at 16, reject invalid symbols, and leave cash/order tables unchanged.
 8. Run existing Python safety tests, new catalog/backend tests and JavaScript offline UI regression in GitHub Actions.
 9. **Follow-up on Windows:** run the full `E:\MeridianDesk` GUI acceptance and verify Yahoo international symbol availability and latency on the actual PC. Confirm no new provider requests occur until explicit selection.
 
