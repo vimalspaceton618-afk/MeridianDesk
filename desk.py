@@ -284,12 +284,20 @@ class Desk:
             except Exception as e:
                 result=str(e) or type(e).__name__
                 success=False
+            # Publish terminal job state only AFTER its audit event is committed.
+            # Otherwise a Windows client can observe "complete" while SQLite is
+            # still locked by the writer, causing false evidence and cleanup races.
+            try:
+                self.ledger.log(tag.upper(),symbol,
+                                report_text(result) if kind=="autonomous" and success
+                                else result if isinstance(result,str)
+                                else json.dumps(result,ensure_ascii=False))
+            except Exception as exc:
+                # Audit failure must never appear as a successful research job.
+                success=False
+                result="Research audit persistence failed: "+type(exc).__name__
             with self.lock:
                 self.jobs[key]={**row,"state":"complete" if success else "error","result":result,"finished":time.time()}
-            self.ledger.log(tag.upper(),symbol,
-                            report_text(result) if kind=="autonomous" and success
-                            else result if isinstance(result,str)
-                            else json.dumps(result,ensure_ascii=False))
         self.pool.submit(run)
         return row
 
