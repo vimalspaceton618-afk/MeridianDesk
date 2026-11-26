@@ -158,6 +158,9 @@ class AutonomousJobTests(unittest.TestCase):
             self.assertIn("Mock local",done["result"])
             worker.assert_called_once()
             self.assertFalse(worker.call_args.kwargs["with_provider"])
+            # Job status flips before asynchronous SQLite audit logging completes.
+            # Join the worker before the temporary test directory is removed.
+            self.desk.pool.shutdown(wait=True)
 
     def test_manual_local_agent_run_without_external_provider(self):
         pack,_=sample()
