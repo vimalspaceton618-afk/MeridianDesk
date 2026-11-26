@@ -39,6 +39,44 @@ async function refresh(){
  }catch(e){$('health').textContent='Local service offline';if(!state)$('content').innerHTML=`<div class="panel empty">${esc(e.message)}</div>`}
  finally{inFlight=false;if(s!==symbol)void refresh()}
 }
+
+/* Local-only quick switcher. Never exposes order, halt or broker actions. */
+let commandMatches=[],commandIndex=0;
+function commandOptions(){
+ const pages=Object.entries(sections).map(([id,meta])=>({kind:'page',id,name:meta[0],detail:meta[2]}));
+ const instruments=Object.entries(watchMeta).map(([id,meta])=>{
+  const observed=(state?.watch||[]).find(item=>item.symbol===id);
+  return {kind:'instrument',id,name:meta[0]+' · '+id,
+   detail:observed?.name||(id==='DEMO'?'Offline synthetic fixture':'Market instrument')};
+ });
+ return pages.concat(instruments);
+}
+function renderCommands(){
+ const input=$('commandSearch'),term=input.value.trim().toLowerCase();
+ commandMatches=commandOptions().filter(item=>(item.name+' '+item.id+' '+item.detail).toLowerCase().includes(term)).slice(0,12);
+ commandIndex=Math.max(0,Math.min(commandIndex,commandMatches.length-1));
+ $('commandResults').innerHTML=commandMatches.length?commandMatches.map((item,index)=>
+  '<button type="button" class="command-result'+(index===commandIndex?' is-active':'')+'" data-cmd-index="'+index+'" aria-label="'+esc(item.name)+'">'+
+  '<span class="command-marker">'+(item.kind==='page'?'▦':'◈')+'</span><span class="command-copy"><strong>'+esc(item.name)+
+  '</strong><small>'+esc(item.detail)+'</small></span><span class="command-type">'+(item.kind==='page'?'WORKSPACE':'INSTRUMENT')+'</span></button>'
+ ).join(''):'<div class="command-empty">No matching workspace or instrument.</div>';
+}
+function openCommand(){
+ if($('modal').open)return;
+ const dialog=$('commandPalette');
+ if(!dialog.open)dialog.showModal();
+ $('commandSearch').value='';
+ commandIndex=0;
+ renderCommands();
+ $('commandSearch').focus();
+}
+function chooseCommand(item){
+ if(!item)return;
+ $('commandPalette').close();
+ if(item.kind==='page')navigate(item.id);
+ else{navigate('market');selectInstrument(item.id)}
+}
+
 function navigate(id){if(sections[id]){page=id;render();window.scrollTo(0,0)}}
 function selectInstrument(s){if(!watchMeta[s])return;symbol=s;if(state?.symbol!==s){state={...state,symbol:s,market:null,analysis:null,error:''};render()}refresh()}
 function render(){
@@ -51,13 +89,33 @@ function render(){
  if(page==='market'&&state.market)drawChart();
  if(state.market&&state.analysis)document.body.dataset.ready='yes';
 }
+
+/* Describe what was observed without implying that a live order is approved. */
+function renderProvenance(){
+ const m=state?.market,a=state?.analysis;
+ if(!m)return '<section class="data-integrity pending" aria-label="Market data provenance"><span class="origin-flag">AWAITING SOURCE</span><span class="data-summary">Select DEMO to inspect a reproducible offline example.</span></section>';
+ const kind=!m.live?'SIMULATED':m.stale?'STALE':/^(websocket|ws)$/i.test(m.transport||'')?'EXCHANGE TICKER':'PUBLIC BAR';
+ const color=!m.live?'simulated':m.stale?'stale':kind==='EXCHANGE TICKER'?'observed':'indicative';
+ const moment=Number.isFinite(m.asof)?stamp(m.asof):'Observation time unavailable';
+ const age=Number.isFinite(m.age_seconds)?Math.max(0,m.age_seconds).toFixed(1)+'s old':'Age unverified';
+ const quote=Number.isFinite(m.bid)&&Number.isFinite(m.ask)?
+  'Bid '+price(m.bid)+' / Ask '+price(m.ask):'No two-sided quote';
+ const decision=a?.veto?'Research entry veto applies':m.stale?'Stale observations cannot authorize orders':'Orders require fresh independent risk checks';
+ return '<section class="data-integrity" aria-label="Market data provenance">'+
+  '<div class="data-origin"><span class="origin-flag '+color+'"><i aria-hidden="true"></i>'+kind+'</span>'+
+  '<span class="data-source">'+esc(m.source||'Source not reported')+'</span></div>'+
+  '<div class="data-facts"><span>'+esc(moment)+'</span><span>'+esc(age)+'</span>'+
+  '<span>'+esc(m.session||'Session unknown')+'</span><span>'+esc(quote)+'</span></div>'+
+  '<div class="data-rule">'+esc(decision)+'</div></section>';
+}
+
 function renderMarket(){
  const m=state.market,a=state.analysis,r=a?.risk||{},w=state.watch.find(x=>x.symbol===symbol);
  const tiles=state.watch.filter(w=>['BTC-USD','ETH-USD','SPY','GC=F'].includes(w.symbol)).map(w=>`<button class="quote ${w.symbol===symbol?'sel':''}" data-symbol="${esc(w.symbol)}"><div><strong>${esc(watchMeta[w.symbol][0])}</strong><span class="sub">${esc(w.kind)}</span></div><div class="big">${price(w.price)}</div><span class="mono ${tone(w.change)}">${pc(w.change,true)}</span> <small>last bar</small></button>`).join('');
  const list=state.watch.map(w=>{const [name,mark,cls]=watchMeta[w.symbol];return `<button data-symbol="${esc(w.symbol)}" class="${w.symbol===symbol?'selected':''}"><span class="row-start"><span class="asset ${cls}">${esc(mark)}</span><span><strong>${esc(name)}</strong><small>${esc(w.name)}</small></span></span><span class="price">${price(w.price)}<small>${esc(w.kind)}</small></span></button>`}).join('');
  const chart=m?`<div class="chart-top"><div><div class="chart-title">${esc(w.name)}</div><div class="big">${price(w.price)}</div><div class="chart-sub"><span class="${tone(w.change)}">${pc(w.change,true)}</span> · previous ${esc(m.interval)} bar</div></div><div class="chart-tool"><div class="tabs">${[30,90,240].map(n=>`<button class="${n===windowBars?'on':''}" title="Show ${n} bars" data-act="range" data-val="${n}">${n}</button>`).join('')}</div><div class="tabs"><button data-act="style">${chartStyle}</button></div></div></div><div class="canvas-wrap"><canvas id="chart" aria-label="${esc(symbol)} price and volume history"></canvas></div><div class="chart-foot"><span>${esc(m.source)}</span><span>${esc(m.interval)} · ${clock(m.asof)}</span></div>`:`<div class="empty tall">Waiting for ${esc(symbol)} market data. ${esc(state.error)}<p class="section-gap">Select DEMO for offline research.</p></div>`;
  const metrics=[['One-bar CVaR 99%',pc(r.cvar99)],['Peak drawdown',pc(r.max_drawdown)],['Volatility / bar',pc(r.bar_volatility)]].map(([k,v])=>`<div><label>${k}</label><b>${v}</b></div>`).join('');
- return `<div class="quotes">${tiles}</div><div class="grid-main"><section class="panel"><div class="panel-head"><h2>Price action</h2>${badge(m?(m.live?(m.stale?'Stale observation':m.transport||'Public feed'):'Simulated'):'Awaiting feed',m?.stale?'hold':m?.live?'good':'')}</div>${chart}</section><section class="panel"><div class="panel-head"><h2>Watchlist</h2><span class="sub">${state.watch.length} instruments</span></div><div class="watch">${list}</div></section></div><div class="grid-main lower">${panel('Risk assessment',`<div class="metric-grid">${metrics}</div><p class="note ${a?.veto?'amber':''}">${esc(!a?'Waiting for a usable price history.':m?.stale?'Market data are stale. New orders are on hold.':a.reasons.slice(0,2).join(' ')||'No entry veto recorded for this snapshot.')}</p>`,badge(a?(a.veto||m?.stale?'Entry on hold':'Research gate clear'):'Awaiting data',a?.veto||m?.stale?'hold':a?'good':''))}${panel('Research swarm',`<div class="row"><h3>${a?a.agents.length:0} specialist checks</h3>${badge('8 pods')}</div><p class="tagline">${esc(a?.verdict||'Awaiting analysis')}</p><button data-page="research" class="text-btn section-gap">Inspect findings →</button>`)}</div>`
+ return `${renderProvenance()}<div class="quotes">${tiles}</div><div class="grid-main"><section class="panel"><div class="panel-head"><h2>Price action</h2>${badge(m?(m.live?(m.stale?'Stale observation':m.transport||'Public feed'):'Simulated'):'Awaiting feed',m?.stale?'hold':m?.live?'good':'')}</div>${chart}</section><section class="panel"><div class="panel-head"><h2>Watchlist</h2><span class="sub">${state.watch.length} instruments</span></div><div class="watch">${list}</div></section></div><div class="grid-main lower">${panel('Risk assessment',`<div class="metric-grid">${metrics}</div><p class="note ${a?.veto?'amber':''}">${esc(!a?'Waiting for a usable price history.':m?.stale?'Market data are stale. New orders are on hold.':a.reasons.slice(0,2).join(' ')||'No entry veto recorded for this snapshot.')}</p>`,badge(a?(a.veto||m?.stale?'Entry on hold':'Research gate clear'):'Awaiting data',a?.veto||m?.stale?'hold':a?'good':''))}${panel('Research swarm',`<div class="row"><h3>${a?a.agents.length:0} specialist checks</h3>${badge('8 pods')}</div><p class="tagline">${esc(a?.verdict||'Awaiting analysis')}</p><button data-page="research" class="text-btn section-gap">Inspect findings →</button>`)}</div>`
 }
 function drawChart(){
  const c=$('chart');if(!c||!state.market)return;
@@ -123,6 +181,40 @@ document.addEventListener('click',async e=>{
  }catch(err){toast(err.message)}
 });
 document.addEventListener('change',async e=>{try{if(e.target.classList.contains('instrument-select'))selectInstrument(e.target.value);else await researchChange(e.target)}catch(err){toast(err.message)}});
+
+/* Keyboard navigation remains inert for broker, halt and privileged actions. */
+$('commandLauncher').addEventListener('click',openCommand);
+$('commandSearch').addEventListener('input',()=>{commandIndex=0;renderCommands()});
+$('commandSearch').addEventListener('keydown',e=>{
+ if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+  e.preventDefault();
+  if(!commandMatches.length)return;
+  commandIndex=(commandIndex+(e.key==='ArrowDown'?1:-1)+commandMatches.length)%commandMatches.length;
+  renderCommands();
+  $('commandResults').querySelector('.is-active')?.scrollIntoView({block:'nearest'});
+ }else if(e.key==='Enter'){
+  e.preventDefault();
+  chooseCommand(commandMatches[commandIndex]);
+ }
+});
+$('commandResults').addEventListener('click',e=>{
+ const button=e.target.closest('button[data-cmd-index]');
+ if(button)chooseCommand(commandMatches[Number(button.dataset.cmdIndex)]);
+});
+$('commandPalette').addEventListener('close',()=>$('commandLauncher').focus());
+document.addEventListener('keydown',e=>{
+ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){
+  e.preventDefault();
+  openCommand();
+ }else if(e.key==='/'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!$('modal').open&&!$('commandPalette').open){
+  const focused=document.activeElement;
+  if(!['INPUT','SELECT','TEXTAREA'].includes(focused?.tagName)&&!focused?.isContentEditable){
+   e.preventDefault();
+   openCommand();
+  }
+ }
+});
+
 $('closeModal').onclick=()=>$('modal').close();
 window.addEventListener('resize',()=>{if(page==='market')drawChart()});
 window.verifyNavigation=()=>{for(const k of Object.keys(sections)){navigate(k);if(!$('content').textContent.trim()||$('title').textContent!==sections[k][0])return false}navigate('market');return !!$('chart')&&$('chart').width>100&&state.watch.length===8};
