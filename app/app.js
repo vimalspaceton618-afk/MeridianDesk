@@ -96,7 +96,7 @@ function renderProvenance(){
  const m=state?.market,a=state?.analysis;
  if(!m)return '<section class="data-integrity pending" aria-label="Market data provenance"><span class="origin-flag">AWAITING SOURCE</span><span class="data-summary">Select DEMO to inspect a reproducible offline example.</span></section>';
  const kind=m.stale?'STALE':!m.live?'SIMULATED':/^(websocket|ws)$/i.test(m.transport||'')?'EXCHANGE TICKER':'PUBLIC BAR';
- const color=!m.live?'simulated':m.stale?'stale':kind==='EXCHANGE TICKER'?'observed':'indicative';
+ const color=m.stale?'stale':!m.live?'simulated':kind==='EXCHANGE TICKER'?'observed':'indicative';
  const moment=Number.isFinite(m.asof)?stamp(m.asof):'Observation time unavailable';
  const age=Number.isFinite(m.age_seconds)?Math.max(0,m.age_seconds).toFixed(1)+'s old':'Age unverified';
  const quote=Number.isFinite(m.bid)&&Number.isFinite(m.ask)?
