@@ -240,6 +240,7 @@ class Desk:
             if len(raw)>4_000_000:
                 raise ValueError("Import a report or the last 4 MB of an Experts log.")
             folder=ROOT/"cache"/"temp"
+            folder.mkdir(parents=True,exist_ok=True)
             dest=folder/(uuid.uuid4().hex+".log")
             try:
                 dest.write_bytes(raw)

@@ -1,0 +1,65 @@
+name: Offline financial safety gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - engineering/phase-1-evidence-gates
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-paper-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MERIDIAN_BROKER: "off"
+      APCA_API_KEY_ID: ""
+      APCA_API_SECRET_KEY: ""
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout source (pinned action)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify paper-only testing policy
+        shell: bash
+        run: |
+          test "$MERIDIAN_BROKER" = "off"
+          test -z "$APCA_API_KEY_ID"
+          test -z "$APCA_API_SECRET_KEY"
+      - name: Run offline standard-library financial tests
+        run: |
+          python3 -B -m unittest -v \
+            test_analytics \
+            test_market \
+            test_orders \
+            test_swarm \
+            test_phase1_slice \
+            test_mt5_import_clean
+      - name: Verify loopback desktop API security and paper workflows
+        run: |
+          python3 -B -m unittest -v \
+            test_desk.DesktopServiceTests.test_session_guards_and_local_shell \
+            test_desk.DesktopServiceTests.test_registry_and_renderable_analysis \
+            test_desk.DesktopServiceTests.test_fill_retries_sizing_and_restart \
+            test_desk.DesktopServiceTests.test_indicative_and_stale_sources_block_fills \
+            test_desk.DesktopServiceTests.test_mt5_report_import \
+            test_desk.DesktopServiceTests.test_duplicate_job_and_reported_worker_error \
+            test_desk.DesktopServiceTests.test_fresh_price_dislocation_queues_local_swarm_once
+      - name: Check source compilation (without executing Windows launcher)
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+              "analytics.py", "broker.py", "desk.py", "filings.py",
+              "integrations.py", "ledger.py", "market.py",
+              "swarm.py", "test_phase1_slice.py", "test_mt5_import_clean.py",
+          ]
+          for name in files:
+              compile(Path(name).read_bytes(), name, "exec")
+              print("Syntax OK:", name)
+          PY
