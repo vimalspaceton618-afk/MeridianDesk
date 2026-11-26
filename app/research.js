@@ -197,10 +197,12 @@ async function researchClick(action, element) {
         case 'rs-autonomous': await job('autonomous'); break;
         case 'rs-backtest': await job('backtest'); break;
         case 'rs-swarm':
-            modal('Run swarm', symbol, '<p>The local run combines specialist verdicts, a Ruflo risk review and a Kronos forecast on the selected snapshot.</p>' +
-                '<p class="foot-note">Including TradingAgents sends a price summary to your configured model provider and may use its paid quota.</p>' +
+            modal('Run swarm', symbol, '<p>The local run combines specialist verdicts, Ruflo risk review and Kronos forecasting on the selected snapshot, if the optional engines are installed.</p>' +
+                (state.instrument ?
+                '<p class="foot-note">Global stocks: local-only research. Provider inference and live/paper orders are disabled. Models may not be calibrated for this exchange or currency.</p>' :
+                '<p class="foot-note">Including TradingAgents sends a price summary to your configured model provider and may use its paid quota.</p>') +
                 '<div class="actions section-gap">' + rsButton('rs-swarm-local', 'Run locally', 'class="primary"') +
-                rsButton('rs-swarm-provider', 'Include TradingAgents') + '</div>');
+                (state.instrument ? '' : rsButton('rs-swarm-provider', 'Include TradingAgents')) + '</div>');
             break;
         case 'rs-swarm-local':
         case 'rs-swarm-provider':
