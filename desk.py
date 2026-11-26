@@ -205,7 +205,8 @@ class Desk:
                 b=q["bars"] if q else []
                 watch.append({"symbol":ticker,"name":record["name"],"price":b[-1]["close"] if b else None,
                     "change":b[-1]["close"]/b[-2]["close"]-1 if len(b)>1 else None,
-                    "kind":"WAIT" if not q else "STALE" if q.get("stale") else "PUBLIC",
+                    "kind":"WAIT" if not q else "STALE" if q.get("stale") else
+                    "SIM" if not q.get("live") else "PUBLIC",
                     "currency":q.get("currency",record["currency"]) if q else record["currency"],
                     "spark":[v["close"] for v in b[-18:]]})
             pack,a=self.selected(s) if s in self.quotes else (None,None)
