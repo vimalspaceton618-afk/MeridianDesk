@@ -1,0 +1,39 @@
+name: Windows PR4 regression reproduction
+
+on:
+  push:
+    branches:
+      - fix/windows-pr4-regression-suite
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-pr4:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    env:
+      MERIDIAN_BROKER: "off"
+      APCA_API_KEY_ID: ""
+      APCA_API_SECRET_KEY: ""
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run exact two post-update regression modules on Windows
+        shell: pwsh
+        run: |
+          python -B -m unittest -v test_global_market test_autonomous_research
+      - name: Check suite version
+        shell: pwsh
+        run: python --version
