@@ -40,6 +40,16 @@ jobs:
             test_swarm \
             test_phase1_slice \
             test_mt5_import_clean
+      - name: Verify loopback desktop API security and paper workflows
+        run: |
+          python3 -B -m unittest -v \
+            test_desk.DesktopServiceTests.test_session_guards_and_local_shell \
+            test_desk.DesktopServiceTests.test_registry_and_renderable_analysis \
+            test_desk.DesktopServiceTests.test_fill_retries_sizing_and_restart \
+            test_desk.DesktopServiceTests.test_indicative_and_stale_sources_block_fills \
+            test_desk.DesktopServiceTests.test_mt5_report_import \
+            test_desk.DesktopServiceTests.test_duplicate_job_and_reported_worker_error \
+            test_desk.DesktopServiceTests.test_fresh_price_dislocation_queues_local_swarm_once
       - name: Check source compilation (without executing Windows launcher)
         run: |
           python3 - <<'PY'
