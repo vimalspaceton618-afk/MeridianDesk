@@ -22,6 +22,7 @@ class Ledger:
                     price REAL, fee REAL, requested REAL, source TEXT);
                 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts REAL, category TEXT, symbol TEXT, detail TEXT);
                 CREATE TABLE IF NOT EXISTS snapshots(symbol TEXT PRIMARY KEY, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS watchlist(symbol TEXT PRIMARY KEY, added REAL NOT NULL);
             """)
 
     @contextmanager
@@ -59,6 +60,27 @@ class Ledger:
     def recent(self):
         with self.db() as db:
             return [dict(r) for r in db.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 80")]
+
+    def watched(self):
+        """Persist a bounded collection of research-only instruments locally."""
+        with self.db() as db:
+            return [row["symbol"] for row in db.execute(
+                "SELECT symbol FROM watchlist ORDER BY added ASC, symbol ASC")]
+
+    def watch(self, symbol, enabled):
+        if type(enabled) is not bool:
+            raise ValueError("Invalid watchlist operation.")
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            exists=db.execute("SELECT 1 FROM watchlist WHERE symbol=?",(symbol,)).fetchone()
+            if enabled and not exists:
+                count=db.execute("SELECT COUNT(*) FROM watchlist").fetchone()[0]
+                if count>=16:
+                    raise ValueError("Watchlist limit of 16 international symbols reached.")
+                db.execute("INSERT INTO watchlist VALUES(?,?)",(symbol,time.time()))
+            elif not enabled:
+                db.execute("DELETE FROM watchlist WHERE symbol=?",(symbol,))
+        return self.watched()
 
     def portfolio(self, marks):
         with self.db() as db:
