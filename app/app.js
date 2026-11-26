@@ -152,7 +152,7 @@ function renderAudit(){
  return `<section class="panel"><div class="panel-head"><h2>Desk activity</h2><span class="sub">Latest ${state.audit.length} events</span></div>${state.audit.length?state.audit.map(r=>`<div class="audit-item"><span class="mono muted">${esc(stamp(r.ts))}</span><span>${esc(r.category)}</span><b>${esc(r.symbol)}</b><span><span class="audit-preview">${esc(r.detail)}</span><button class="text-btn" data-act="record" data-id="${r.id}">View record</button></span></div>`).join(''):'<div class="empty">Research runs, trades and risk decisions will appear here.</div>'}</section>`
 }
 async function job(kind,engine){const j=await api('/api/job',{kind,engine,symbol});toast(`${j.task} queued for ${symbol}.`);await refresh();return j}
-function showResult(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;const out=typeof j.result==='object'?Object.entries(j.result).map(([k,v])=>`${k}   ${v}`).join('\n'):j.result;modal(`${j.task} · ${j.symbol}`,j.state.toUpperCase(),`<pre class="result">${esc(out||'Research is in progress.')}</pre>`)}
+function showResult(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;const out=j.result&&typeof j.result==='object'?JSON.stringify(j.result,null,2):j.result;modal(`${j.task} · ${j.symbol}`,j.state.toUpperCase(),`<pre class="result">${esc(out||'Research is in progress.')}</pre>`)}
 function ticket(remote){
  if(state?.instrument){toast('Global catalog instruments are research-only; broker and paper orders remain disabled.');return}
  const m=state?.market;if(!m){toast('Select an instrument with market observations.');return}
