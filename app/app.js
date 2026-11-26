@@ -74,7 +74,8 @@ function chooseCommand(item){
  if(!item)return;
  $('commandPalette').close();
  if(item.kind==='page')navigate(item.id);
- else{navigate('market');selectInstrument(item.id)}
+ else if(state?.watch){navigate('market');selectInstrument(item.id)}
+ else{symbol=item.id;page='market';render();void refresh()}
 }
 
 function navigate(id){if(sections[id]){page=id;render();window.scrollTo(0,0)}}
