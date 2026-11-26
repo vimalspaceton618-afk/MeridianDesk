@@ -231,8 +231,10 @@ class Desk:
         if (kind not in ("research","backtest","integration","filings","swarm","autonomous") or
                 (symbol not in market.SYMBOLS and not universe.available(symbol))):
             raise ValueError("Unknown research request.")
-        if universe.available(symbol) and kind not in ("research","backtest","autonomous"):
-            raise ValueError("International catalog research supports only offline review, autonomous analysis and backtest.")
+        if universe.available(symbol) and kind not in ("research","backtest","autonomous","swarm"):
+            raise ValueError("International catalog research supports only review, local swarm, autonomous analysis and backtest.")
+        if universe.available(symbol) and kind=="swarm" and engine is not None:
+            raise ValueError("Global equities permit local-only Ruflo/Kronos swarm; external provider modes are disabled.")
         if kind=="autonomous" and engine not in (None,"local"):
             raise ValueError("Autonomous research runs locally; provider routing is not authorized.")
         pack,snapshot_analysis=captured if captured is not None else self.selected(symbol)
