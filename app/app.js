@@ -46,13 +46,14 @@ function renderGlobalExplorer(){
  const country=$('globalRegion').value;
  const matches=globalCatalog.filter(record=>(!country||record.country===country)&&
    [record.symbol,record.name,record.country,record.exchange].join(' ').toLowerCase().includes(query));
+ matches.sort((a,b)=>Number((state?.pinned||[]).includes(b.symbol))-Number((state?.pinned||[]).includes(a.symbol)));
  $('globalSummary').textContent=matches.length+' listings match · '+globalCatalog.length+' curated worldwide · browse or search';
  $('globalResults').innerHTML=matches.slice(0,55).map(record=>
   '<button type="button" data-global-symbol="'+esc(record.symbol)+'" class="global-result">'+
   '<span class="global-symbol">'+esc(record.symbol)+'</span>'+
   '<span class="global-title"><strong>'+esc(record.name)+'</strong><small>'+
   esc(record.country)+' · '+esc(record.exchange)+'</small></span>'+
-  '<span class="global-currency">'+esc(record.currency)+'</span></button>').join('')||
+  '<span class="global-currency">'+((state?.pinned||[]).includes(record.symbol)?'PINNED · ':'')+esc(record.currency)+'</span></button>').join('')||
   '<div class="empty">No matching listing in the curated directory.</div>';
  if(matches.length>55)$('globalSummary').textContent+=' · showing first 55; use search to narrow';
 }
@@ -74,15 +75,18 @@ async function refresh(){
 function navigate(id){if(sections[id]){page=id;render();window.scrollTo(0,0)}}
 function selectInstrument(s){
  const selected=globalCatalog?.find(record=>record.symbol===s);
- if(!watchMeta[s]&&!selected)return;
+ const fromWatch=state?.watch.find(record=>record.symbol===s);
+ if(!watchMeta[s]&&!selected&&!fromWatch)return;
+ const global=selected||(!watchMeta[s]&&fromWatch?
+  {symbol:s,name:fromWatch.name,country:'International',exchange:'View listing details',currency:fromWatch.currency}:null);
  symbol=s;
  if(state?.symbol!==s){
   const watch=state?.watch||[];
-  const extra=selected&&!watch.some(item=>item.symbol===s)?
-   [{symbol:s,name:selected.name,price:null,change:null,kind:'WAIT',currency:selected.currency,spark:[]}]:[];
+  const extra=global&&!watch.some(item=>item.symbol===s)?
+   [{symbol:s,name:global.name,price:null,change:null,kind:'WAIT',currency:global.currency,spark:[]}]:[];
   state={...state,symbol:s,market:null,analysis:null,
-   error:selected?'Requesting public observation on demand…':'',
-   instrument:selected||null,watch:watch.concat(extra)};
+   error:global?'Requesting public observation on demand…':'',
+   instrument:global,watch:watch.concat(extra)};
   render();
  }
  refresh();
@@ -92,7 +96,9 @@ function render(){
  const [title,kicker,subtitle]=sections[page];$('title').textContent=title;$('crumb').textContent=title;$('kicker').textContent=kicker;$('subtitle').textContent=subtitle;
  $('pageActions').innerHTML=page==='market'?
   '<button data-act="catalog">Explore global stocks</button>'+
-  (state?.instrument?'': '<button data-act="ticket" class="primary">New paper order</button>'):
+  (state?.instrument?
+   '<button data-act="watch-toggle">'+((state?.pinned||[]).includes(symbol)?'Unpin stock':'Pin to watchlist')+'</button>':
+   '<button data-act="ticket" class="primary">New paper order</button>'):
   page==='portfolio'?'<button class="danger" data-act="halt">'+(state?.portfolio.halted?'Resume trading':'Halt new orders')+'</button>'+
   (state?.instrument?'':'<button data-act="ticket">New paper order</button>'):'';
  if(!state)return;
@@ -166,6 +172,13 @@ document.addEventListener('click',async e=>{
   if(el.dataset.globalSymbol){$('modal').close();selectInstrument(el.dataset.globalSymbol);return}
   const act=el.dataset.act;
   if(act==='catalog')await openGlobalExplorer();
+  else if(act==='watch-toggle'){
+   if(!state?.instrument)throw Error('Select an international catalog listing first.');
+   const enable=!(state.pinned||[]).includes(symbol);
+   await api('/api/watchlist',{symbol,enabled:enable});
+   toast(enable?'Stock pinned locally. Quotes load when selected.':'Stock removed from saved watchlist.');
+   await refresh();
+  }
   else if(act==='range'){windowBars=Number(el.dataset.val);render()}
   else if(act==='style'){chartStyle=chartStyle==='Candles'?'Line':'Candles';render()}
   else if(act==='ticket'||act==='broker-ticket')ticket(act==='broker-ticket');
