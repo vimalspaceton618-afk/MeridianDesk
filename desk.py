@@ -42,6 +42,7 @@ def research_trigger(previous,current):
 class Desk:
     def __init__(self, database, verification=False):
         self.ledger=Ledger(database)
+        self.pinned=self.ledger.watched()
         self.broker=Broker(self.ledger)
         self.lock=threading.RLock()
         self.order_lock=threading.RLock()
@@ -66,6 +67,11 @@ class Desk:
             if pack and s!="DEMO":
                 pack.update(stale=True,session="Cached snapshot",age_seconds=None)
                 self.accept(s,pack,save=False)
+        for s in self.pinned:
+            cached=self.ledger.snapshot(s)
+            if cached:
+                cached.update(stale=True,session="Cached research snapshot",age_seconds=None)
+                self.accept(s,cached,save=False)
         self.accept("DEMO",market.demo_bars("DEMO"),save=False)
 
     def start(self):
@@ -176,11 +182,11 @@ class Desk:
                     "kind":"SIM" if k=="DEMO" else "WAIT" if not q else "STALE" if q.get("stale") else
                     "LIVE" if q.get("transport","").upper() in ("WEBSOCKET","WS") else "PUBLIC",
                     "spark":[v["close"] for v in b[-18:]]})
-            if universe.available(s):
-                record=universe.CATALOG[s]
-                q=self.quotes.get(s)
+            for ticker in dict.fromkeys(self.pinned+([s] if universe.available(s) else [])):
+                record=universe.CATALOG[ticker]
+                q=self.quotes.get(ticker)
                 b=q["bars"] if q else []
-                watch.append({"symbol":s,"name":record["name"],"price":b[-1]["close"] if b else None,
+                watch.append({"symbol":ticker,"name":record["name"],"price":b[-1]["close"] if b else None,
                     "change":b[-1]["close"]/b[-2]["close"]-1 if len(b)>1 else None,
                     "kind":"WAIT" if not q else "STALE" if q.get("stale") else "PUBLIC",
                     "currency":q.get("currency",record["currency"]) if q else record["currency"],
@@ -189,7 +195,8 @@ class Desk:
             jobs=list(self.jobs.values())[-25:]
             err=self.errors.get(s,"")
         return {"watch":watch,"market":pack,"analysis":a,"error":err,"symbol":s,
-            "instrument":dict(universe.CATALOG[s]) if universe.available(s) else None,"portfolio":self.ledger.portfolio(self.marks()),
+            "instrument":dict(universe.CATALOG[s]) if universe.available(s) else None,
+            "pinned":list(self.pinned),"portfolio":self.ledger.portfolio(self.marks()),
             "audit":self.ledger.recent(),"broker":self.broker.status(),"broker_orders":self.broker.tickets(),
             "jobs":jobs,"filings":self.fund.get(s,{}).get("filings",[]) if self.fund.get(s) else [],"clock":time.time()}
 
@@ -260,6 +267,13 @@ class Desk:
         return row
 
     def action(self,path,body):
+        if path=="/api/watchlist":
+            symbol=body.get("symbol")
+            if not universe.available(symbol):
+                raise ValueError("Only approved international research symbols can be pinned.")
+            with self.lock:
+                self.pinned=self.ledger.watch(symbol,body.get("enabled"))
+                return {"pinned":list(self.pinned)}
         if path=="/api/job":
             return self.job(body["kind"],body["symbol"],body.get("engine"))
         if path=="/api/halt":
