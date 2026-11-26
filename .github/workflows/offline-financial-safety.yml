@@ -50,6 +50,12 @@ jobs:
             test_desk.DesktopServiceTests.test_mt5_report_import \
             test_desk.DesktopServiceTests.test_duplicate_job_and_reported_worker_error \
             test_desk.DesktopServiceTests.test_fresh_price_dislocation_queues_local_swarm_once
+      - name: Validate browser JavaScript and offline navigation behavior
+        run: |
+          node --check app/app.js
+          node --check app/research.js
+          node --check tests/test-workspace-navigation.cjs
+          node tests/test-workspace-navigation.cjs
       - name: Check source compilation (without executing Windows launcher)
         run: |
           python3 - <<'PY'
