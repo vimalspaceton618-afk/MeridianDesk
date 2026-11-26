@@ -55,6 +55,7 @@ jobs:
           node --check app/app.js
           node --check app/research.js
           node --check tests/test-workspace-navigation.cjs
+          node --check tests/verify-desktop.cjs
           node tests/test-workspace-navigation.cjs
       - name: Check source compilation (without executing Windows launcher)
         run: |
